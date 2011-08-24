@@ -15,6 +15,53 @@ PARTFILE="part_crhan"
 BASE_SYSTEM="http://10.253.75.1/xen/baserhsys-48-32.tar"
 BASE_SYSTEM_FILE="$XEN_PREFIX/${BASE_SYSTEM##*/}"
 
+function check_base_system_tar()
+{
+	[ -d $XEN_PREFIX ] || mkdir -p $XEN_PREFIX
+	for i in $BASE_SYSTEM ;do
+		local file=${i##*/}
+		[ -f $XEN_PREFIX/$file ] || wget -O $XEN_PREFIX/$file $i
+		[ -f $XEN_PREFIX/${file}.MD5 ] || wget -O $XEN_PREFIX/${file}.MD5 ${i}.MD5
+	done
+
+	for md5 in $XEN_PREFIX/*.MD5; do
+		cd $XEN_PREFIX
+		md5sum -c $md5 || rm ${md5%%.MD5}
+		check_base_system_tar
+	done
+}
+
+function guest_xen()
+{
+	local HOST=`hostname`
+	local DMIDECODECMD=`which dmidecode`
+	local os_servicetag=`$DMIDECODECMD | grep "Serial Number" | head -1 | awk '{print $3}'`
+
+	wget -q -O /tmp/xen_guest  "http://10.253.33.2/xen_connect_xyx.php?&action=search_install&phyhost=$os_servicetag"
+
+	for line in `cat /tmp/xen_guest`
+	do
+		xen_host=`echo "$line" | awk -F ';' '{print $1}'`
+		xen_mac_1=`echo "$line" | awk -F ';' '{print $2}'`
+		xen_mac_2=`echo "$line" | awk -F ';' '{print $3}'`
+		xen_cpu=`echo "$line" | awk -F ';' '{print $4}'`
+		xen_mem=`echo "$line" | awk -F ';' '{print $5}'`
+		xen_disk=`echo "$line" | awk -F ';' '{print $6}'`
+
+		cat << EOF > /etc/xen/auto/$xen_host
+name = "$xen_host"
+memory = "$xen_mem"
+maxmem = "$xen_mem"
+disk = [ 'phy:$xen_disk,xvda,w' ]
+bootloader = "/usr/bin/pygrub"
+vif = [ 'mac=$xen_mac_1,bridge=eth0', 'mac=${xen_mac_2},bridge=eth1']
+vcpus = $xen_cpu
+on_reboot = 'restart'
+on_crash = 'restart'
+EOF
+	done
+}
+
 [ -d $XEN_PREFIX ] || mkdir -p $XEN_PREFIX
 
 check_base_system_tar
@@ -27,8 +74,8 @@ for VM in $XEN_CONFIG/*;do
 	grep ${VM##*/} /tmp/xm_list && continue
 
 	# get the disk info
-	DISK=`grep -e "\bdisk\b" $VM > $DISK`
-	DISK=`cat $DISK |cut -d':' -f2|cut -d',' -f1`
+	DISK=`grep -e "\bdisk\b" $VM`
+	DISK=`echo $DISK |cut -d':' -f2|cut -d',' -f1`
 
 	# get the MAC info
 	MAC=cat $VM|grep -e '\bvif\b'|cut -d"=" -f3|cut -d"," -f1
@@ -120,43 +167,7 @@ EOF
   fi
 
 	umount -lf ${VM_INSTALL_PATH}/{boot,home,}
+	kpartx -d $DISK_PATH
+break
 done
 
-function check_base_system_tar(){
-	[ -d $XEN_PREFIX ] || mkdir -p $XEN_PREFIX
-	for i in $BASE_TAR ;do
-		local file=${i##*/}
-		[ -f $XEN_PREFIX/$file ] || wget -O $XEN_PREFIX/$file $i
-	done
-}
-
-function guest_xen()
-{
-	local HOST=`hostname`
-	local DMIDECODECMD=`which dmidecode`
-	local os_servicetag=`$DMIDECODECMD | grep "Serial Number" | head -1 | awk '{print $3}'`
-
-	wget -q -O /tmp/xen_guest  "http://10.253.33.2/xen_connect_xyx.php?&action=search_install&phyhost=$os_servicetag"
-
-	for line in `cat /tmp/xen_guest`
-	do
-		xen_host=`echo "$line" | awk -F ';' '{print $1}'`
-		xen_mac_1=`echo "$line" | awk -F ';' '{print $2}'`
-		xen_mac_2=`echo "$line" | awk -F ';' '{print $3}'`
-		xen_cpu=`echo "$line" | awk -F ';' '{print $4}'`
-		xen_mem=`echo "$line" | awk -F ';' '{print $5}'`
-		xen_disk=`echo "$line" | awk -F ';' '{print $6}'`
-
-		cat << EOF > /etc/xen/auto/$xen_host
-name = "$xen_host"
-memory = "$xen_mem"
-maxmem = "$xen_mem"
-disk = [ 'phy:$xen_disk,xvda,w' ]
-bootloader = "/usr/bin/pygrub"
-vif = [ 'mac=$xen_mac_1,bridge=eth0', 'mac=${xen_mac_2},bridge=eth1']
-vcpus = $xen_cpu
-on_reboot = 'restart'
-on_crash = 'restart'
-EOF
-	done
-}
