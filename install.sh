@@ -5,6 +5,7 @@
 #
 # History:
 #	2011/08/23	ruohan.chen	First release
+#	2011/08/24	ruohan.chen	complete
 #
 PATH="/sbin:/bin:/usr/sbin:/usr/bin"
 
@@ -66,6 +67,7 @@ EOF
 }
 
 [ -d $XEN_PREFIX ] || mkdir -p $XEN_PREFIX
+[ -d $XEN_PREFIX/log ] || mkdir -p $XEN_PREFIX/log
 
 cat <<EOF > $PART_TABLE 
 o
@@ -102,7 +104,7 @@ p
 w
 EOF
 
-#check_base_system_tar
+check_base_system_tar
 
 guest_xen
 
@@ -110,6 +112,8 @@ for VM in $XEN_CONFIG/*;do
 	# if current VM is running, skip it
 	xm list > /tmp/xm_list
 	grep "${VM##*/}" /tmp/xm_list && continue
+
+	echo "	Installing ${VM##*/}"
 
 	# get the disk info
 	DISK=`grep -e "\bdisk\b" $VM`
@@ -125,15 +129,15 @@ for VM in $XEN_CONFIG/*;do
 	VM_INSTALL_PATH="$XEN_PREFIX/${VM##*/}"
 
 	# create partition table for lv
-	cat $PART_TABLE| fdisk $DISK_PATH
+	cat $PART_TABLE| fdisk $DISK_PATH >> $XEN_PREFIX/log/fdisk
 
 	# create device maps for partition table
 	kpartx -a $DISK_PATH
 
 	# format and label the partition
-	mkfs.ext3 /dev/mapper/${DISK_NAME}p1
-	mkfs.ext3 /dev/mapper/${DISK_NAME}p2
-	mkfs.ext3 /dev/mapper/${DISK_NAME}p5
+	mkfs.ext3 /dev/mapper/${DISK_NAME}p1 > $XEN_PREFIX/log/mkfs.${DISK_NAME}
+	mkfs.ext3 /dev/mapper/${DISK_NAME}p2 > $XEN_PREFIX/log/mkfs.${DISK_NAME}
+	mkfs.ext3 /dev/mapper/${DISK_NAME}p5 > $XEN_PREFIX/log/mkfs.${DISK_NAME}
 	mkswap -L SWAP /dev/mapper/${DISK_NAME}p3
 	e2label /dev/mapper/${DISK_NAME}p1 "/boot"
 	e2label /dev/mapper/${DISK_NAME}p2 "/"
@@ -146,8 +150,10 @@ for VM in $XEN_CONFIG/*;do
 	mkdir ${VM_INSTALL_PATH}/home
 	mount /dev/mapper/${DISK_NAME}p1 ${VM_INSTALL_PATH}/boot
 	mount /dev/mapper/${DISK_NAME}p5 ${VM_INSTALL_PATH}/home
+	echo "	Format and Mount complete"
 
 	# untar the base system
+	echo "	Untaring system"
 	tar xf $BASE_SYSTEM_FILE -C ${VM_INSTALL_PATH}
 	
 	# config ip for new system
@@ -205,6 +211,10 @@ USERCTL=no
 EOF
   fi
 
+	echo "	Configuring network complete"
+
 	umount -lf ${VM_INSTALL_PATH}/{boot,home,}
 	kpartx -d $DISK_PATH
+	xm create $VM
+	echo "Install ${VM##*/} complete"
 done
