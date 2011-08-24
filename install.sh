@@ -3,6 +3,9 @@
 # Program:
 #	执行完成安装
 #
+# Author:
+#	ruohan.chen		crhan123@gmail.com
+#
 # History:
 #	2011/08/23	ruohan.chen	First release
 #	2011/08/24	ruohan.chen	complete
