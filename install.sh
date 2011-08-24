@@ -10,10 +10,16 @@ PATH="/sbin:/bin:/usr/sbin:/usr/bin"
 
 XEN_PREFIX="/tmp/xen_install"
 XEN_CONFIG="/etc/xen/auto"
+PARTFILE="part_crhan"
 
-BASE_SYSTEM=""
+BASE_SYSTEM="http://10.253.75.1/xen/baserhsys-48-32.tar"
+BASE_SYSTEM_FILE="$XEN_PREFIX/${BASE_SYSTEM##*/}"
 
 [ -d $XEN_PREFIX ] || mkdir -p $XEN_PREFIX
+
+check_base_system_tar
+
+guest_xen
 
 for VM in $XEN_CONFIG/*;do
 	# if current VM is running, skip it
@@ -27,30 +33,18 @@ for VM in $XEN_CONFIG/*;do
 	# get the MAC info
 	MAC=cat $VM|grep -e '\bvif\b'|cut -d"=" -f3|cut -d"," -f1
 
-	mkPartition
-
-
-done
-
-function check_base_system_tar(){
-	[ -d $XEN_PREFIX ] || mkdir -p $XEN_PREFIX
-	for i in $BASE_TAR ;do
-		local file=${i##*/}
-		[ -f $XEN_PREFIX/$file ] || wget -O $XEN_PREFIX/$file $i
-	done
-}
-
-function mkPartition()
-{
-	PARTFILE="part_crhan"
+	# make and mount lv's partition
 	DISK_GROUP="${DISK%%/*}"
 	DISK_NAME="${DISK##*/}"
 	DISK_PATH="/dev/${DISK_GROUP}/${DISK_NAME}"
 	VM_INSTALL_PATH="$XEN_PREFIX/${VM##*/}"
 
+	# create partition table for lv
 	cat $PARTFILE | fdisk $DISK_PATH
+	# create device maps for partition table
 	kpartx -a $DISK_PATH
 
+	# format and label the partition
 	mkfs.ext3 /dev/mapper/${DISK_NAME}p1
 	mkfs.ext3 /dev/mapper/${DISK_NAME}p2
 	mkfs.ext3 /dev/mapper/${DISK_NAME}p5
@@ -59,6 +53,7 @@ function mkPartition()
 	e2label /dev/mapper/${DISK_NAME}p2 "/"
 	e2label /dev/mapper/${DISK_NAME}p5 "/home"
 
+	# mount
 	mkdir -p ${VM_INSTALL_PATH}
 	mount /dev/mapper/${DISK_NAME}p2 ${VM_INSTALL_PATH}
 	mkdir ${VM_INSTALL_PATH}/boot
@@ -66,15 +61,10 @@ function mkPartition()
 	mount /dev/mapper/${DISK_NAME}p1 ${VM_INSTALL_PATH}/boot
 	mount /dev/mapper/${DISK_NAME}p5 ${VM_INSTALL_PATH}/home
 
-	tar xf $BASE_SYSTEM -C ${VM_INSTALL_PATH}
+	# untar the base system
+	tar xf $BASE_SYSTEM_FILE -C ${VM_INSTALL_PATH}
 	
-	config_ip
-	
-	umount -lf ${VM_INSTALL_PATH}/{boot,home}
-	umount -lf ${VM_INSTALL_PATH}
-}
-
-function config_ip() {
+	# config ip for new system
     wget -q -O /tmp/host_info  "http://10.253.33.2/xen_connect_xyx.php?action=search_host&mac=${MAC}"
     HOST_NAME=`head -n 1 /tmp/host_info |awk -F: '{print $1}'`
     IP_ADDR=`head -n 1 /tmp/host_info |awk -F: '{print $2}'`
@@ -129,7 +119,16 @@ USERCTL=no
 EOF
   fi
 
- }
+	umount -lf ${VM_INSTALL_PATH}/{boot,home,}
+done
+
+function check_base_system_tar(){
+	[ -d $XEN_PREFIX ] || mkdir -p $XEN_PREFIX
+	for i in $BASE_TAR ;do
+		local file=${i##*/}
+		[ -f $XEN_PREFIX/$file ] || wget -O $XEN_PREFIX/$file $i
+	done
+}
 
 function guest_xen()
 {
