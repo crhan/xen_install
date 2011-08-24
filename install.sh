@@ -10,7 +10,7 @@ PATH="/sbin:/bin:/usr/sbin:/usr/bin"
 
 XEN_PREFIX="/tmp/xen_install"
 XEN_CONFIG="/etc/xen/auto"
-PARTFILE="part_crhan"
+PART_TABLE="$XEN_PREFIX/part-table"
 
 BASE_SYSTEM="http://10.253.75.1/xen/baserhsys-48-32.tar"
 BASE_SYSTEM_FILE="$XEN_PREFIX/${BASE_SYSTEM##*/}"
@@ -21,13 +21,16 @@ function check_base_system_tar()
 	for i in $BASE_SYSTEM ;do
 		local file=${i##*/}
 		[ -f $XEN_PREFIX/$file ] || wget -O $XEN_PREFIX/$file $i
-		[ -f $XEN_PREFIX/${file}.MD5 ] || wget -O $XEN_PREFIX/${file}.MD5 ${i}.MD5
+		wget -O $XEN_PREFIX/${file}.MD5 ${i}.MD5
 	done
 
 	for md5 in $XEN_PREFIX/*.MD5; do
 		cd $XEN_PREFIX
-		md5sum -c $md5 || rm ${md5%%.MD5}
-		check_base_system_tar
+		# md5 check
+		if ! md5sum -c $md5; then
+			rm ${md5%%.MD5}
+			check_base_system_tar
+		fi
 	done
 }
 
@@ -64,21 +67,56 @@ EOF
 
 [ -d $XEN_PREFIX ] || mkdir -p $XEN_PREFIX
 
-check_base_system_tar
+cat <<EOF > $PART_TABLE 
+o
+n
+p
+1
+
++250M
+a
+1
+n
+p
+2
+
++15G
+n
+p
+3
+
++2G
+t
+3
+82
+n
+e
+4
+
+
+n
+l
+
+
+p
+w
+EOF
+
+#check_base_system_tar
 
 guest_xen
 
 for VM in $XEN_CONFIG/*;do
 	# if current VM is running, skip it
 	xm list > /tmp/xm_list
-	grep ${VM##*/} /tmp/xm_list && continue
+	grep "${VM##*/}" /tmp/xm_list && continue
 
 	# get the disk info
 	DISK=`grep -e "\bdisk\b" $VM`
 	DISK=`echo $DISK |cut -d':' -f2|cut -d',' -f1`
 
 	# get the MAC info
-	MAC=cat $VM|grep -e '\bvif\b'|cut -d"=" -f3|cut -d"," -f1
+	MAC=`cat $VM|grep -e '\bvif\b'|cut -d"=" -f3|cut -d"," -f1`
 
 	# make and mount lv's partition
 	DISK_GROUP="${DISK%%/*}"
@@ -87,7 +125,8 @@ for VM in $XEN_CONFIG/*;do
 	VM_INSTALL_PATH="$XEN_PREFIX/${VM##*/}"
 
 	# create partition table for lv
-	cat $PARTFILE | fdisk $DISK_PATH
+	cat $PART_TABLE| fdisk $DISK_PATH
+
 	# create device maps for partition table
 	kpartx -a $DISK_PATH
 
@@ -168,6 +207,4 @@ EOF
 
 	umount -lf ${VM_INSTALL_PATH}/{boot,home,}
 	kpartx -d $DISK_PATH
-break
 done
-
