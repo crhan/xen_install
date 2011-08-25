@@ -27,8 +27,8 @@ BASE_SYSTEM_FILE="$XEN_PREFIX/${BASE_SYSTEM##*/}"
 STDOUT=6
 STDERR=7
 # backup STDOUT and STDERR
-exec $STDOUT>&1
-exec $STDERR>&2
+exec 6>&1
+exec 7>&2
 
 quietopt=false
 color=true
@@ -71,7 +71,6 @@ error() {
 die() {
     [ -n "$1" ] && error "$*"
     qprint
-    $evalopt && { echo; echo "false;"; }
     exit 1
 }
 
@@ -142,7 +141,6 @@ umount_volumn(){
 }
 
 check_base_system_tar() {
-	[ -d $XEN_PREFIX ] || mkdir -p $XEN_PREFIX
 	for i in $BASE_SYSTEM ;do
 		local file=${i##*/}
 		[ -f $XEN_PREFIX/$file ] || wget -O $XEN_PREFIX/$file $i
@@ -306,8 +304,9 @@ while [ -n "$1" ]; do
 			setaction reinstall
 			if [ -n "$1" ]; then
 				REINSTALL_FILE=$1;
+				[ -f "$REINSTALL_FILE" ] || die "Reinstall file $REINSTALL_FILE does not exist."
 			else
-				die "--reinstall requires a file with hostname in each line"
+				die "--reinstall requires a file with hostname in each line."
 			fi
 			;;
 		--version|-V)
@@ -330,7 +329,6 @@ qprint
 mesg "${PURP}XEN_VM_Auto_Install ${OFF}${CYANN}${version}${OFF} ~ ${GREEN}http://www.alipay.com${OFF}"
 [ "$myaction" = version ] && { versinfo; exit 0; }
 [ "$myaction" = help ] && { versinfo; helpinfo; exit 0; }
-
 
 [ -d $XEN_PREFIX ] || mkdir -p $XEN_PREFIX
 [ -d $XEN_PREFIX/log ] || mkdir -p $XEN_PREFIX/log
@@ -381,10 +379,30 @@ guest_xen
 # umount volumn when catching signal 1 9 15
 trap 'umount_volumn; exit 1' 1 9 15
 
-for VM in $XEN_CONFIG/*;do
-	# if current VM is running, skip it
-	xm list > /tmp/xm_list
-	grep "${VM_NAME}" /tmp/xm_list && continue
+case "$myaction" in
+    install)
+        XEN_CONFIG_FILES=`ls $XEN_CONFIG`
+        ;;
+    reinstall)
+        XEN_CONFIG_FILES=`cat $REINSTALL_FILE`
+        ;;
+    *)
+        die "Unknown action by $myaction."
+esac
+
+for VM in $XEN_CONFIG_FILES ;do
+    xm list > /tmp/xm_list
+    case "$myaction" in
+        install)
+            # if current VM is running, skip it
+            grep "${VM_NAME}" /tmp/xm_list && continue
+            ;;
+        reinstall)
+            if grep "${VM_NAME}" /tmp/xm_list; then
+                xm destory ${VM_NAME} || die "destory ${VM_NAME} failed"
+            fi
+            ;;
+    esac
 
   # gather_info befor each install stage
   gather_info
@@ -394,5 +412,7 @@ for VM in $XEN_CONFIG/*;do
 	umount_volumn
 	start_vm
 
+	exec 1>>$XEN_PREFIX/log/unexpected.log
+	exec 2>>$XEN_PREFIX/log/unexpected.error
 done
 
