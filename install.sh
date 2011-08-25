@@ -228,7 +228,7 @@ gather_info() {
 	VM_LOG="$XEN_PREFIX/log/${VM_NAME}.log"
 	VM_ERROR_LOG="$XEN_PREFIX/log/${VM_NAME}.error"
   exec 1>>$VM_LOG
-  exec 2>>&1
+  exec 2>&1
 
 	mesg "Installing ${VM_NAME}"
 }
@@ -435,6 +435,6 @@ for VM_NAME in $XEN_CONFIG_FILES ;do
 	start_vm
 
 	exec 1>>$XEN_PREFIX/log/unexpected.log
-	exec 2>>&1
+	exec 2>&1
 done
 
