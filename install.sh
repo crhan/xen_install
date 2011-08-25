@@ -10,10 +10,8 @@
 #	2011/08/23	ruohan.chen	First release
 #	2011/08/24	ruohan.chen	complete
 #
-version=1.1
-
+version="v1.1"
 PATH="/sbin:/bin:/usr/sbin:/usr/bin"
-
 
 XEN_PREFIX="/tmp/xen_install"
 XEN_CONFIG="/etc/xen/auto"
@@ -57,13 +55,13 @@ mesg() {
 # synopsis: warn "message"
 # Prettily print a warning to stderr
 warn() {
-    echo " ${RED}* Warning${OFF}: $*" >>&$STDERR
+    echo " ${RED}* Warning${OFF}: $*" >&$STDERR
 }
 
 # synopsis: error "message"
 # Prettily print an error
 error() {
-    echo " ${RED}* Error${OFF}: $*" >>&$STDERR
+    echo " ${RED}* Error${OFF}: $*" >&$STDERR
 }
 
 # synopsis: die "message"
@@ -87,8 +85,22 @@ versinfo() {
 helpinfo() {
 	cat >&$STDOUT <<EOHELP
 SYNOPSIS
-    $(basename $0) [ ${GREEN}-hVr${OFF} ] [ ${GREEN}--version --help --nocolor --quite${OFF} ] 
+    $(basename $0) [ ${GREEN}-hVr${OFF} ] [ ${GREEN}--version --help --nocolor --quite
+    --reinstall${OFF} ] 
     < ${GREEN}--system${OFF} ${CYAN}mark${OFF} >
+
+    ${GREEN}--reinstall${OFF} ${CYAN}hostfile${OFF}
+        Reinstall VMs in given hostfile
+
+    ${GREEN}--nocolor${OFF}
+        Disable color hilighting for non ANSI-compatible terms.
+
+    ${GREEN}-h${OFF} ${GREEN}--help${OFF}
+        Show help that looks remarkably like this man-page. As of 2.6.10,
+        help is sent to stdout so it can be easily piped to a pager.
+
+    ${GREEN}-V${OFF} ${GREEN}--version${OFF}
+        Show version information.
 
 EOHELP
 }
@@ -97,7 +109,7 @@ EOHELP
 # Sets $myaction or dies if $myaction is already set
 setaction() {
     if [ -n "$myaction" ]; then
-        die "you can't specify --$myaction and $1 at the same time"
+        die "you can't specify --$myaction and --$1 at the same time"
     else
         myaction="$1"
     fi
@@ -108,7 +120,7 @@ setaction() {
 # use var defined in gather_info() to format label and mount disks
 prepare_disk() {
 	# create partition table for lv
-	cat $PART_TABLE| fdisk $DISK_PATH >> $XEN_PREFIX/log/fdisk
+	cat $PART_TABLE| fdisk $DISK_PATH
 
 	# create device maps for partition table
 	kpartx -a $DISK_PATH
@@ -299,7 +311,7 @@ while [ -n "$1" ]; do
 		--help|-h)
 			setaction help
 			;;
-		--reinstall|-r)
+		--reinstall)
 			shift
 			setaction reinstall
 			if [ -n "$1" ]; then
