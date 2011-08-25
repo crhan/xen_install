@@ -86,8 +86,7 @@ helpinfo() {
 	cat >&$STDOUT <<EOHELP
 SYNOPSIS
     $(basename $0) [ ${GREEN}-hVr${OFF} ] [ ${GREEN}--version --help --nocolor --quite
-    --reinstall${OFF} ] 
-    < ${GREEN}--system${OFF} ${CYAN}mark${OFF} >
+    --reinstall${OFF} ] < ${GREEN}--system${OFF} ${CYAN}mark${OFF} >
 
     ${GREEN}--reinstall${OFF} ${CYAN}hostfile${OFF}
         Reinstall VMs in given hostfile
@@ -155,15 +154,20 @@ umount_volumn(){
 check_base_system_tar() {
 	for i in $BASE_SYSTEM ;do
 		local file=${i##*/}
-		[ -f $XEN_PREFIX/$file ] || wget -O $XEN_PREFIX/$file $i
+		if ! [ -f $XEN_PREFIX/$file ];then
+		    mesg "Downloading system archive file"
+		    wget -O $XEN_PREFIX/$file $i
+    fi
 		wget -O $XEN_PREFIX/${file}.MD5 ${i}.MD5
 	done
 
 	for md5 in $XEN_PREFIX/*.MD5; do
 		cd $XEN_PREFIX
 		# md5 check
+		mesg "MD5 checking"
 		if ! md5sum -c $md5; then
 			rm ${md5%%.MD5}
+			warn "MD5 check failed"
 			check_base_system_tar
 		fi
 	done
@@ -197,6 +201,7 @@ on_reboot = 'restart'
 on_crash = 'restart'
 EOF
 	done
+	mesg "Generate `ls $XEN_CONFIG|wc -l` VMs"
 }
 
 # synopsis: gather_info
@@ -230,6 +235,7 @@ gather_info() {
 untar_system() {
 	mesg "Untaring system"
 	tar xf $BASE_SYSTEM_FILE -C ${VM_INSTALL_PATH}
+	mesg "Untar complete"
 }
 
 # synopsis: config_ip
@@ -295,7 +301,7 @@ EOF
 # nothing to say
 start_vm() {
 	xm create $VM
-	echo "Install ${VM_NAME} complete"
+	mesg "Install ${VM_NAME} complete"
 }
 
 ###################################
