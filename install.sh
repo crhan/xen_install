@@ -4,15 +4,16 @@
 #	执行完成安装
 #
 # Author:
-#	ruohan.chen		crhan123@gmail.com
+#	@ruohanc		crhan123@gmail.com
 #
 # History:
-#	2011/08/23	ruohan.chen	First release
-#	2011/08/24	ruohan.chen	complete
+#	2011/08/23	@ruohanc	First release
+#	2011/08/24	@ruohanc	complete
 #
-version="v1.1"
+version="v1.2"
 PATH="/sbin:/bin:/usr/sbin:/usr/bin"
 
+CWD="$( cd "$( dirname "$0" )" && pwd )"
 XEN_PREFIX="/tmp/xen_install"
 XEN_CONFIG="/etc/xen/auto"
 LOG="$XEN_PREFIX/log/install.log"
@@ -30,6 +31,7 @@ exec 7>&2
 
 quietopt=false
 color=true
+checksum=true
 unset myaction
 
 BLUE="[34;01m"
@@ -45,23 +47,30 @@ qprint() {
     $quietopt || echo "$*" >&$STDERR
 }
 
+# synopsis: logger "message"
+logger() {
+	echo "`date "+%h %d %H:%M:%S"` `hostname`: $*" >> $LOG
+}
+
 # synopsis: mesg "message"
 # Prettily print something to stderr, honors quietopt
 mesg() {
     qprint " ${GREEN}*${OFF} $*"
-    echo "`date "+%h %d %H:%M:%S"` `hostname`: $*" >> $LOG
+	logger " ${GREEN}*${OFF} $*"
 }
 
 # synopsis: warn "message"
 # Prettily print a warning to stderr
 warn() {
     echo " ${RED}* Warning${OFF}: $*" >&$STDERR
+	logger " ${RED}* Warning${OFF}: $*"
 }
 
 # synopsis: error "message"
 # Prettily print an error
 error() {
     echo " ${RED}* Error${OFF}: $*" >&$STDERR
+	logger " ${RED}* Error${OFF}: $*"
 }
 
 # synopsis: die "message"
@@ -76,7 +85,7 @@ die() {
 # Display the version information
 versinfo() {
     qprint
-    qprint "   Copyright ${CYANN}2011${OFF} Alipay, Inc;"
+    qprint "   Copyright ${CYANN}2011${OFF} @ruohanc;"
     qprint
 }
 
@@ -88,11 +97,18 @@ SYNOPSIS
     $(basename $0) [ ${GREEN}-hVr${OFF} ] [ ${GREEN}--version --help --nocolor --quite
     --reinstall${OFF} ] < ${GREEN}--system${OFF} ${CYAN}mark${OFF} >
 
-    ${GREEN}--reinstall${OFF} ${CYAN}hostfile${OFF}
+    ${GREEN}--reinstall-file${OFF} ${CYAN}hostfile${OFF}
         Reinstall VMs in given hostfile
+
+    ${GREEN}--reinstall-hosts${OFF} ${CYAN}hosts${OFF}
+        Reinstall VMs in given string with hostname seperate by
+        whitespace
 
     ${GREEN}--nocolor${OFF}
         Disable color hilighting for non ANSI-compatible terms.
+
+    ${GREEN}--nochecksum${OFF}
+        Disable MD5 check for the base system tar archive
 
     ${GREEN}-h${OFF} ${GREEN}--help${OFF}
         Show help that looks remarkably like this man-page. As of 2.6.10,
@@ -104,10 +120,10 @@ SYNOPSIS
 EOHELP
 }
 
-# synopsis: setaction
+# synopsis: setaction action
 # Sets $myaction or dies if $myaction is already set
 setaction() {
-    if [ -n "$myaction" ]; then
+    if [ -n "$myaction" ] && [ "$myaction" = "$1" ]; then
         die "you can't specify --$myaction and --$1 at the same time"
     else
         myaction="$1"
@@ -151,6 +167,9 @@ umount_volumn(){
 	kpartx -d $DISK_PATH 2>/dev/null
 }
 
+# synopsis: check_base_system_tar
+# Download the chosen system archive file if not exist
+# then check the MD5 sum if $checksum is true
 check_base_system_tar() {
 	for i in $BASE_SYSTEM ;do
 		local file=${i##*/}
@@ -160,21 +179,23 @@ check_base_system_tar() {
     else
         mesg "System archive file \"$XEN_PREFIX/$file\" exist"
     fi
-		wget -O $XEN_PREFIX/${file}.MD5 ${i}.MD5
+		checksum && wget -O $XEN_PREFIX/${file}.MD5 ${i}.MD5
 	done
 
+	checksum || return 0
 	for md5 in $XEN_PREFIX/*.MD5; do
-		cd $XEN_PREFIX
 		# md5 check
 		mesg "MD5 checking"
-		if ! md5sum -c $md5; then
+		if ! (cd $XEN_PREFIX; md5sum -c $md5); then
 			rm ${md5%%.MD5}
 			warn "MD5 check failed, re-download file again"
 			check_base_system_tar
 		fi
 	done
 }
-
+# synopsis: guest_xen
+# Use the SN code to get VM info from admin server
+# then generate the xen bootstrap config file automatically
 guest_xen() {
 	local HOST=`hostname`
 	local DMIDECODECMD=`which dmidecode`
@@ -193,6 +214,8 @@ guest_xen() {
 		xen_mem=`echo "$line" | awk -F ';' '{print $5}'`
 		xen_disk=`echo "$line" | awk -F ';' '{print $6}'`
 
+		[ -z $xen_host ] && continue
+
 		cat << EOF > /etc/xen/auto/$xen_host
 name = "$xen_host"
 memory = "$xen_mem"
@@ -205,7 +228,7 @@ on_reboot = 'restart'
 on_crash = 'restart'
 EOF
 	done
-	mesg "Generate `ls $XEN_CONFIG|wc -l` VMs"
+	mesg "Auto generate `ls $XEN_CONFIG|wc -l` VMs"
 }
 
 # synopsis: gather_info
@@ -230,7 +253,7 @@ gather_info() {
   exec 1>>$VM_LOG
   exec 2>&1
 
-	mesg "Installing ${VM_NAME}"
+	mesg "Start install ${VM_NAME}"
 }
 
 # synopsis: untar_system
@@ -303,6 +326,7 @@ EOF
 # synopsis: start_vm
 # nothing to say
 start_vm() {
+	mesg "Starting VM ${VM_NAME}"
 	xm create $VM
 	mesg "Install ${VM_NAME} complete"
 }
@@ -320,7 +344,7 @@ while [ -n "$1" ]; do
 		--help|-h)
 			setaction help
 			;;
-		--reinstall)
+		--reinstall-file)
 			shift
 			setaction reinstall
 			if [ -n "$1" ]; then
@@ -330,11 +354,21 @@ while [ -n "$1" ]; do
 				die "--reinstall requires a file with hostname in each line."
 			fi
 			;;
+		--reinstall-hosts)
+			shift
+			setaction reinstall
+			if [ -n "$1" ]; then
+				XEN_CONFIG_FILES=${XEN_CONFIG_FILES+$XEN_CONFIG_FILES }${1}
+			fi
+			;;
 		--version|-V)
 			setaction version
 			;;
 		--nocolor)
 			color=false
+			;;
+		--nochecksum)
+			checksum=false
 			;;
 	esac
 	shift
@@ -393,6 +427,7 @@ EOF
 exec 1>$XEN_PREFIX/log/pre.log
 exec 2>$XEN_PREFIX/log/pre.error
 
+mesg "Start installing"
 check_base_system_tar
 guest_xen
 
@@ -402,10 +437,10 @@ trap 'umount_volumn; exit 1' 1 9 15
 
 case "$myaction" in
     install)
-        XEN_CONFIG_FILES=`ls $XEN_CONFIG`
+        XEN_CONFIG_FILES=$(ls $XEN_CONFIG)
         ;;
     reinstall)
-        XEN_CONFIG_FILES=`cat $REINSTALL_FILE`
+        [ -z $XEN_CONFIG_FILES ] && XEN_CONFIG_FILES=$(cat $REINSTALL_FILE)
         ;;
     *)
         die "Unknown action by $myaction."
@@ -418,10 +453,14 @@ for VM_NAME in $XEN_CONFIG_FILES ;do
     case "$myaction" in
         install)
             # if current VM is running, skip it
-            grep "${VM_NAME}" /tmp/xm_list && continue
+            if grep "${VM_NAME}" /tmp/xm_list;then
+                warn "VM ${VM_NAME} is RUNNING, skip it"
+                continue
+            fi
             ;;
         reinstall)
             if grep "${VM_NAME}" /tmp/xm_list; then
+                mesg "VM ${VM_NAME} is RUNNING, destroy it"
                 xm destroy ${VM_NAME} || die "destory ${VM_NAME} failed"
             fi
             ;;
@@ -436,5 +475,6 @@ for VM_NAME in $XEN_CONFIG_FILES ;do
 
 	exec 1>>$XEN_PREFIX/log/unexpected.log
 	exec 2>&1
+	qprint
 done
-
+mesg "All Finish"
