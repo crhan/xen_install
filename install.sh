@@ -157,6 +157,8 @@ check_base_system_tar() {
 		if ! [ -f $XEN_PREFIX/$file ];then
 		    mesg "Downloading system archive file"
 		    wget -O $XEN_PREFIX/$file $i
+    else
+        mesg "System archive file \"$XEN_PREFIX/$file\"exist"
     fi
 		wget -O $XEN_PREFIX/${file}.MD5 ${i}.MD5
 	done
