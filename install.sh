@@ -182,6 +182,8 @@ guest_xen() {
 
 	wget -q -O /tmp/xen_guest  "http://10.253.33.2/xen_connect_xyx.php?&action=search_install&phyhost=$os_servicetag"
 
+	[ -d /etc/xen/auto ] || mkdir -p /etc/xen/auto	
+
 	for line in `cat /tmp/xen_guest`
 	do
 		xen_host=`echo "$line" | awk -F ';' '{print $1}'`
@@ -226,7 +228,7 @@ gather_info() {
 	VM_LOG="$XEN_PREFIX/log/${VM_NAME}.log"
 	VM_ERROR_LOG="$XEN_PREFIX/log/${VM_NAME}.error"
   exec 1>>$VM_LOG
-  exec 2>>$VM_ERROR_LOG
+  exec 2>>&1
 
 	mesg "Installing ${VM_NAME}"
 }
@@ -408,12 +410,11 @@ case "$myaction" in
     *)
         die "Unknown action by $myaction."
 esac
-mesg $myaction
 
 for VM_NAME in $XEN_CONFIG_FILES ;do
     xm list > /tmp/xm_list
     gather_info
-mesg "Perpare for $VM_NAME"
+    mesg "Perpare for $VM_NAME"
     case "$myaction" in
         install)
             # if current VM is running, skip it
@@ -421,7 +422,7 @@ mesg "Perpare for $VM_NAME"
             ;;
         reinstall)
             if grep "${VM_NAME}" /tmp/xm_list; then
-                xm destory ${VM_NAME} || die "destory ${VM_NAME} failed"
+                xm destroy ${VM_NAME} || die "destory ${VM_NAME} failed"
             fi
             ;;
     esac
@@ -434,6 +435,6 @@ mesg "Perpare for $VM_NAME"
 	start_vm
 
 	exec 1>>$XEN_PREFIX/log/unexpected.log
-	exec 2>>$XEN_PREFIX/log/unexpected.error
+	exec 2>>&1
 done
 
