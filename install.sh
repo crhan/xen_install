@@ -10,17 +10,102 @@
 #	2011/08/23	ruohan.chen	First release
 #	2011/08/24	ruohan.chen	complete
 #
+version=1.1
+
 PATH="/sbin:/bin:/usr/sbin:/usr/bin"
+
 
 XEN_PREFIX="/tmp/xen_install"
 XEN_CONFIG="/etc/xen/auto"
 PART_TABLE="$XEN_PREFIX/part-table"
 
-BASE_SYSTEM="http://10.253.75.1/xen/baserhsys-48-32.tar"
+SYSTEM_55_64="http://10.253.75.1/xen/baserhsys-55-64.tar"
+SYSTEM_48_32="http://10.253.75.1/xen/baserhsys-48-32.tar"
+BASE_SYSTEM=$SYSTEM_48_32
 BASE_SYSTEM_FILE="$XEN_PREFIX/${BASE_SYSTEM##*/}"
 
-function check_base_system_tar()
-{
+quietopt=false
+color=true
+unset myaction
+
+BLUE="[34;01m"
+CYAN="[36;01m"
+CYANN="[36m"
+GREEN="[32;01m"
+RED="[31;01m"
+PURP="[35;01m"
+OFF="[0m"
+
+# synopsis: qprint "message"
+qprint() {
+    $quietopt || echo "$*" >&2
+}
+
+# synopsis: mesg "message"
+# Prettily print something to stderr, honors quietopt
+mesg() {
+    qprint " ${GREEN}*${OFF} $*"
+}
+
+# synopsis: warn "message"
+# Prettily print a warning to stderr
+warn() {
+    echo " ${RED}* Warning${OFF}: $*" >&2
+}
+
+# synopsis: error "message"
+# Prettily print an error
+error() {
+    echo " ${RED}* Error${OFF}: $*" >&2
+}
+
+# synopsis: die "message"
+# Prettily print an error, then abort
+die() {
+    [ -n "$1" ] && error "$*"
+    qprint
+    $evalopt && { echo; echo "false;"; }
+    exit 1
+}
+
+# synopsis: versinfo
+# Display the version information
+versinfo() {
+    qprint
+    qprint "   Copyright ${CYANN}2011${OFF} Alipay, Inc;"
+    qprint
+}
+
+# synopsis: helpinfo
+# Display the help infomation.
+helpinfo() {
+	cat >&1 <<EOHELP
+SYNOPSIS
+    $(basename $0) [ ${GREEN}-hVr${OFF} ] [ ${GREEN}--version --help --nocolor --quite${OFF} ] 
+    < ${GREEN}--system${OFF} ${CYAN}mark${OFF} >
+
+EOHELP
+}
+
+# synopsis: setaction
+# Sets $myaction or dies if $myaction is already set
+setaction() {
+    if [ -n "$myaction" ]; then
+        die "you can't specify --$myaction and $1 at the same time"
+    else
+        myaction="$1"
+    fi
+}
+
+# synopsis: unmount_volumn
+# umount current volumn
+umount_volumn(){
+	sleep 1
+	umount -lf ${VM_INSTALL_PATH}/{boot,home,} 2>/dev/null
+	kpartx -d $DISK_PATH 2>/dev/null
+}
+
+check_base_system_tar() {
 	[ -d $XEN_PREFIX ] || mkdir -p $XEN_PREFIX
 	for i in $BASE_SYSTEM ;do
 		local file=${i##*/}
@@ -38,8 +123,7 @@ function check_base_system_tar()
 	done
 }
 
-function guest_xen()
-{
+guest_xen() {
 	local HOST=`hostname`
 	local DMIDECODECMD=`which dmidecode`
 	local os_servicetag=`$DMIDECODECMD | grep "Serial Number" | head -1 | awk '{print $3}'`
@@ -68,6 +152,50 @@ on_crash = 'restart'
 EOF
 	done
 }
+
+###################################
+#                                 #
+#            Main Part            #
+#                                 #
+###################################
+
+
+# Parse the command-line
+while [ -n "$1" ]; do
+	case "$1" in
+		--help|-h)
+			setaction help
+			;;
+		--reinstall|-r)
+			shift
+			setaction reinstall
+			if [ -n "$1" ]; then
+				REINSTALL_FILE=$1;
+			else
+				die "--reinstall requires a file with hostname in each line"
+			fi
+			;;
+		--version|-V)
+			setaction version
+			;;
+		--nocolor)
+			color=false
+			;;
+	esac
+	shift
+done
+
+# default action is install all none active vm
+myaction=${myaction-install}
+
+# disable color if necessary
+$color || unset BLUE CYAN CYANN GREEN PURP OFF RED
+
+qprint
+mesg "${PURP}XEN_VM_Auto_Install ${OFF}${CYANN}${version}${OFF} ~ ${GREEN}http://www.alipay.com${OFF}"
+[ "$myaction" = version ] && { versinfo; exit 0; }
+[ "$myaction" = help ] && { versinfo; helpinfo; exit 0; }
+
 
 [ -d $XEN_PREFIX ] || mkdir -p $XEN_PREFIX
 [ -d $XEN_PREFIX/log ] || mkdir -p $XEN_PREFIX/log
@@ -111,13 +239,10 @@ check_base_system_tar
 
 guest_xen
 
-for VM in $XEN_CONFIG/*;do
-	# if current VM is running, skip it
-	xm list > /tmp/xm_list
-	grep "${VM##*/}" /tmp/xm_list && continue
-
-	echo "	Installing ${VM##*/}"
-
+# synopsis: gather_info
+# pre_condition: $VM is set to a config file for xen
+# update the vars to be used
+gather_info() {
 	# get the disk info
 	DISK=`grep -e "\bdisk\b" $VM`
 	DISK=`echo $DISK |cut -d':' -f2|cut -d',' -f1`
@@ -130,6 +255,18 @@ for VM in $XEN_CONFIG/*;do
 	DISK_NAME="${DISK##*/}"
 	DISK_PATH="/dev/${DISK_GROUP}/${DISK_NAME}"
 	VM_INSTALL_PATH="$XEN_PREFIX/${VM##*/}"
+}
+
+# Set up traps
+trap 'umount_volumn; exit 1' 1 9 15 0
+
+for VM in $XEN_CONFIG/*;do
+	# if current VM is running, skip it
+	xm list > /tmp/xm_list
+	grep "${VM##*/}" /tmp/xm_list && continue
+
+	mesg "Installing ${VM##*/}"
+  gather_info
 
 	# create partition table for lv
 	cat $PART_TABLE| fdisk $DISK_PATH >> $XEN_PREFIX/log/fdisk
@@ -153,13 +290,23 @@ for VM in $XEN_CONFIG/*;do
 	mkdir ${VM_INSTALL_PATH}/home
 	mount /dev/mapper/${DISK_NAME}p1 ${VM_INSTALL_PATH}/boot
 	mount /dev/mapper/${DISK_NAME}p5 ${VM_INSTALL_PATH}/home
-	echo "	Format and Mount complete"
+	mesg "Format and Mount complete"
 
 	# untar the base system
-	echo "	Untaring system"
+	mesg "Untaring system"
 	tar xf $BASE_SYSTEM_FILE -C ${VM_INSTALL_PATH}
 	
 	# config ip for new system
+	config_ip
+
+	mesg "Configuring network complete"
+
+	umount_volumn
+	xm create $VM
+	echo "Install ${VM##*/} complete"
+done
+
+config_ip() {
     wget -q -O /tmp/host_info  "http://10.253.33.2/xen_connect_xyx.php?action=search_host&mac=${MAC}"
     HOST_NAME=`head -n 1 /tmp/host_info |awk -F: '{print $1}'`
     IP_ADDR=`head -n 1 /tmp/host_info |awk -F: '{print $2}'`
@@ -213,11 +360,4 @@ ONBOOT=yes
 USERCTL=no
 EOF
   fi
-
-	echo "	Configuring network complete"
-
-	umount -lf ${VM_INSTALL_PATH}/{boot,home,}
-	kpartx -d $DISK_PATH
-	xm create $VM
-	echo "Install ${VM##*/} complete"
-done
+}
