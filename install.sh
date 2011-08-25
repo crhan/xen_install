@@ -17,12 +17,18 @@ PATH="/sbin:/bin:/usr/sbin:/usr/bin"
 
 XEN_PREFIX="/tmp/xen_install"
 XEN_CONFIG="/etc/xen/auto"
+LOG="$XEN_PREFIX/log/install.log"
 PART_TABLE="$XEN_PREFIX/part-table"
 
 SYSTEM_55_64="http://10.253.75.1/xen/baserhsys-55-64.tar"
 SYSTEM_48_32="http://10.253.75.1/xen/baserhsys-48-32.tar"
 BASE_SYSTEM=$SYSTEM_48_32
 BASE_SYSTEM_FILE="$XEN_PREFIX/${BASE_SYSTEM##*/}"
+STDOUT=6
+STDERR=7
+# backup STDOUT and STDERR
+exec $STDOUT>&1
+exec $STDERR>&2
 
 quietopt=false
 color=true
@@ -38,25 +44,26 @@ OFF="[0m"
 
 # synopsis: qprint "message"
 qprint() {
-    $quietopt || echo "$*" >&2
+    $quietopt || echo "$*" >&$STDERR
 }
 
 # synopsis: mesg "message"
 # Prettily print something to stderr, honors quietopt
 mesg() {
     qprint " ${GREEN}*${OFF} $*"
+    echo "`date "+%h %d %H:%M:%S"` `hostname`: $*" >> $LOG
 }
 
 # synopsis: warn "message"
 # Prettily print a warning to stderr
 warn() {
-    echo " ${RED}* Warning${OFF}: $*" >&2
+    echo " ${RED}* Warning${OFF}: $*" >>&$STDERR
 }
 
 # synopsis: error "message"
 # Prettily print an error
 error() {
-    echo " ${RED}* Error${OFF}: $*" >&2
+    echo " ${RED}* Error${OFF}: $*" >>&$STDERR
 }
 
 # synopsis: die "message"
@@ -79,7 +86,7 @@ versinfo() {
 # synopsis: helpinfo
 # Display the help infomation.
 helpinfo() {
-	cat >&1 <<EOHELP
+	cat >&$STDOUT <<EOHELP
 SYNOPSIS
     $(basename $0) [ ${GREEN}-hVr${OFF} ] [ ${GREEN}--version --help --nocolor --quite${OFF} ] 
     < ${GREEN}--system${OFF} ${CYAN}mark${OFF} >
@@ -95,6 +102,35 @@ setaction() {
     else
         myaction="$1"
     fi
+}
+
+# synopsis: prepare_disk
+# pre_condition: gather_info() is run before it
+# use var defined in gather_info() to format label and mount disks
+prepare_disk() {
+	# create partition table for lv
+	cat $PART_TABLE| fdisk $DISK_PATH >> $XEN_PREFIX/log/fdisk
+
+	# create device maps for partition table
+	kpartx -a $DISK_PATH
+
+	# format and label the partition
+	mkfs.ext3 /dev/mapper/${DISK_NAME}p1
+	mkfs.ext3 /dev/mapper/${DISK_NAME}p2
+	mkfs.ext3 /dev/mapper/${DISK_NAME}p5
+	mkswap -L SWAP /dev/mapper/${DISK_NAME}p3
+	e2label /dev/mapper/${DISK_NAME}p1 "/boot"
+	e2label /dev/mapper/${DISK_NAME}p2 "/"
+	e2label /dev/mapper/${DISK_NAME}p5 "/home"
+
+	# mount
+	[ -d ${VM_INSTALL_PATH} ] || mkdir -p ${VM_INSTALL_PATH}
+	mount /dev/mapper/${DISK_NAME}p2 ${VM_INSTALL_PATH}
+	[ -d ${VM_INSTALL_PATH}/boot ] || mkdir ${VM_INSTALL_PATH}/boot
+	[ -d ${VM_INSTALL_PATH}/home ] || mkdir ${VM_INSTALL_PATH}/home
+	mount /dev/mapper/${DISK_NAME}p1 ${VM_INSTALL_PATH}/boot
+	mount /dev/mapper/${DISK_NAME}p5 ${VM_INSTALL_PATH}/home
+	mesg "Format and Mount complete"
 }
 
 # synopsis: unmount_volumn
@@ -151,6 +187,105 @@ on_reboot = 'restart'
 on_crash = 'restart'
 EOF
 	done
+}
+
+# synopsis: gather_info
+# pre_condition: $VM is set to a config file for xen
+# update the vars to be used and REDIRECT stdout and stderr
+gather_info() {
+  VM_NAME=${VM##*/}
+
+	# get the disk info
+	DISK=`grep -e "\bdisk\b" $VM`
+	DISK=`echo $DISK |cut -d':' -f2|cut -d',' -f1`
+	DISK_GROUP="${DISK%%/*}"
+	DISK_NAME="${DISK##*/}"
+	DISK_PATH="/dev/${DISK_GROUP}/${DISK_NAME}"
+	VM_INSTALL_PATH="$XEN_PREFIX/${VM_NAME}"
+
+	# get mac info
+	MAC=`cat $VM|grep -e '\bvif\b'|cut -d"=" -f3|cut -d"," -f1`
+
+  # redirect STDOUT and STDERR
+	VM_LOG="$XEN_PREFIX/log/${VM_NAME}.log"
+	VM_ERROR_LOG="$XEN_PREFIX/log/${VM_NAME}.error"
+  exec 1>>$VM_LOG
+  exec 2>>$VM_ERROR_LOG
+
+	mesg "Installing ${VM_NAME}"
+}
+
+# synopsis: untar_system
+# untar tar archive to install path
+untar_system() {
+	mesg "Untaring system"
+	tar xf $BASE_SYSTEM_FILE -C ${VM_INSTALL_PATH}
+}
+
+# synopsis: config_ip
+# configure new IP and hostname
+config_ip() {
+    wget -q -O /tmp/host_info  "http://10.253.33.2/xen_connect_xyx.php?action=search_host&mac=${MAC}"
+    HOST_NAME=`head -n 1 /tmp/host_info |awk -F: '{print $1}'`
+    IP_ADDR=`head -n 1 /tmp/host_info |awk -F: '{print $2}'`
+    FISRT_THREE_NUM=`echo $IP_ADDR | awk -F. '{print $1"."$2"."$3}'`
+    IP_D4=`echo $IP_ADDR | awk -F. '{print $4}'`
+
+   if [ $IP_D4 -le 120 ];then
+    cat <<EOF > ${VM_INSTALL_PATH}/etc/sysconfig/network
+NETWORKING=yes
+HOSTNAME=${HOST_NAME}
+GATEWAY=${FISRT_THREE_NUM}.126
+EOF
+    cat << EOF > ${VM_INSTALL_PATH}/etc/sysconfig/network-scripts/ifcfg-eth1
+DEVICE=eth1
+BOOTPROTO=none
+IPADDR=${IP_ADDR}
+NETMASK=255.255.255.128
+NETWORK=${FISRT_THREE_NUM}.0
+BROADCAST=${FISRT_THREE_NUM}.127
+ONBOOT=yes
+USERCTL=no
+GATEWAY=${FISRT_THREE_NUM}.126
+EOF
+   cat << EOF > ${VM_INSTALL_PATH}/etc/sysconfig/network-scripts/ifcfg-eth0
+DEVICE=eth0
+BOOTPROTO=none
+ONBOOT=yes
+USERCTL=no
+EOF
+  else
+    cat <<EOF > ${VM_INSTALL_PATH}/etc/sysconfig/network
+NETWORKING=yes
+HOSTNAME=${HOST_NAME}
+GATEWAY=${FISRT_THREE_NUM}.254
+EOF
+    cat << EOF > ${VM_INSTALL_PATH}/etc/sysconfig/network-scripts/ifcfg-eth1
+DEVICE=eth1
+BOOTPROTO=none
+IPADDR=${IP_ADDR}
+NETMASK=255.255.255.128
+NETWORK=${FISRT_THREE_NUM}.128
+BROADCAST=${FISRT_THREE_NUM}.255
+ONBOOT=yes
+USERCTL=no
+GATEWAY=${FISRT_THREE_NUM}.254
+EOF
+   cat << EOF > ${VM_INSTALL_PATH}/etc/sysconfig/network-scripts/ifcfg-eth0
+DEVICE=eth0
+BOOTPROTO=none
+ONBOOT=yes
+USERCTL=no
+EOF
+  fi
+	mesg "Configuring network complete"
+}
+
+# synopsis: start_vm
+# nothing to say
+start_vm() {
+	xm create $VM
+	echo "Install ${VM_NAME} complete"
 }
 
 ###################################
@@ -235,129 +370,29 @@ p
 w
 EOF
 
-check_base_system_tar
+# redirect all STDOUT and STDERR
+exec 1>$XEN_PREFIX/log/pre.log
+exec 2>$XEN_PREFIX/log/pre.error
 
+check_base_system_tar
 guest_xen
 
-# synopsis: gather_info
-# pre_condition: $VM is set to a config file for xen
-# update the vars to be used
-gather_info() {
-	# get the disk info
-	DISK=`grep -e "\bdisk\b" $VM`
-	DISK=`echo $DISK |cut -d':' -f2|cut -d',' -f1`
-
-	# get the MAC info
-	MAC=`cat $VM|grep -e '\bvif\b'|cut -d"=" -f3|cut -d"," -f1`
-
-	# make and mount lv's partition
-	DISK_GROUP="${DISK%%/*}"
-	DISK_NAME="${DISK##*/}"
-	DISK_PATH="/dev/${DISK_GROUP}/${DISK_NAME}"
-	VM_INSTALL_PATH="$XEN_PREFIX/${VM##*/}"
-}
-
 # Set up traps
-trap 'umount_volumn; exit 1' 1 9 15 0
+# umount volumn when catching signal 1 9 15
+trap 'umount_volumn; exit 1' 1 9 15
 
 for VM in $XEN_CONFIG/*;do
 	# if current VM is running, skip it
 	xm list > /tmp/xm_list
-	grep "${VM##*/}" /tmp/xm_list && continue
+	grep "${VM_NAME}" /tmp/xm_list && continue
 
-	mesg "Installing ${VM##*/}"
+  # gather_info befor each install stage
   gather_info
-
-	# create partition table for lv
-	cat $PART_TABLE| fdisk $DISK_PATH >> $XEN_PREFIX/log/fdisk
-
-	# create device maps for partition table
-	kpartx -a $DISK_PATH
-
-	# format and label the partition
-	mkfs.ext3 /dev/mapper/${DISK_NAME}p1 > $XEN_PREFIX/log/mkfs.${DISK_NAME}
-	mkfs.ext3 /dev/mapper/${DISK_NAME}p2 > $XEN_PREFIX/log/mkfs.${DISK_NAME}
-	mkfs.ext3 /dev/mapper/${DISK_NAME}p5 > $XEN_PREFIX/log/mkfs.${DISK_NAME}
-	mkswap -L SWAP /dev/mapper/${DISK_NAME}p3
-	e2label /dev/mapper/${DISK_NAME}p1 "/boot"
-	e2label /dev/mapper/${DISK_NAME}p2 "/"
-	e2label /dev/mapper/${DISK_NAME}p5 "/home"
-
-	# mount
-	mkdir -p ${VM_INSTALL_PATH}
-	mount /dev/mapper/${DISK_NAME}p2 ${VM_INSTALL_PATH}
-	mkdir ${VM_INSTALL_PATH}/boot
-	mkdir ${VM_INSTALL_PATH}/home
-	mount /dev/mapper/${DISK_NAME}p1 ${VM_INSTALL_PATH}/boot
-	mount /dev/mapper/${DISK_NAME}p5 ${VM_INSTALL_PATH}/home
-	mesg "Format and Mount complete"
-
-	# untar the base system
-	mesg "Untaring system"
-	tar xf $BASE_SYSTEM_FILE -C ${VM_INSTALL_PATH}
-	
-	# config ip for new system
+  prepare_disk
+  untar_system
 	config_ip
-
-	mesg "Configuring network complete"
-
 	umount_volumn
-	xm create $VM
-	echo "Install ${VM##*/} complete"
+	start_vm
+
 done
 
-config_ip() {
-    wget -q -O /tmp/host_info  "http://10.253.33.2/xen_connect_xyx.php?action=search_host&mac=${MAC}"
-    HOST_NAME=`head -n 1 /tmp/host_info |awk -F: '{print $1}'`
-    IP_ADDR=`head -n 1 /tmp/host_info |awk -F: '{print $2}'`
-    FISRT_THREE_NUM=`echo $IP_ADDR | awk -F. '{print $1"."$2"."$3}'`
-    IP_D4=`echo $IP_ADDR | awk -F. '{print $4}'`
-
-   if [ $IP_D4 -le 120 ];then
-    cat <<EOF > ${VM_INSTALL_PATH}/etc/sysconfig/network
-NETWORKING=yes
-HOSTNAME=${HOST_NAME}
-GATEWAY=${FISRT_THREE_NUM}.126
-EOF
-    cat << EOF > ${VM_INSTALL_PATH}/etc/sysconfig/network-scripts/ifcfg-eth1
-DEVICE=eth1
-BOOTPROTO=none
-IPADDR=${IP_ADDR}
-NETMASK=255.255.255.128
-NETWORK=${FISRT_THREE_NUM}.0
-BROADCAST=${FISRT_THREE_NUM}.127
-ONBOOT=yes
-USERCTL=no
-GATEWAY=${FISRT_THREE_NUM}.126
-EOF
-   cat << EOF > ${VM_INSTALL_PATH}/etc/sysconfig/network-scripts/ifcfg-eth0
-DEVICE=eth0
-BOOTPROTO=none
-ONBOOT=yes
-USERCTL=no
-EOF
-  else
-    cat <<EOF > ${VM_INSTALL_PATH}/etc/sysconfig/network
-NETWORKING=yes
-HOSTNAME=${HOST_NAME}
-GATEWAY=${FISRT_THREE_NUM}.254
-EOF
-    cat << EOF > ${VM_INSTALL_PATH}/etc/sysconfig/network-scripts/ifcfg-eth1
-DEVICE=eth1
-BOOTPROTO=none
-IPADDR=${IP_ADDR}
-NETMASK=255.255.255.128
-NETWORK=${FISRT_THREE_NUM}.128
-BROADCAST=${FISRT_THREE_NUM}.255
-ONBOOT=yes
-USERCTL=no
-GATEWAY=${FISRT_THREE_NUM}.254
-EOF
-   cat << EOF > ${VM_INSTALL_PATH}/etc/sysconfig/network-scripts/ifcfg-eth0
-DEVICE=eth0
-BOOTPROTO=none
-ONBOOT=yes
-USERCTL=no
-EOF
-  fi
-}
