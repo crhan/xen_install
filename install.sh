@@ -167,7 +167,7 @@ check_base_system_tar() {
 		mesg "MD5 checking"
 		if ! md5sum -c $md5; then
 			rm ${md5%%.MD5}
-			warn "MD5 check failed"
+			warn "MD5 check failed, re-download file again"
 			check_base_system_tar
 		fi
 	done
@@ -205,11 +205,10 @@ EOF
 }
 
 # synopsis: gather_info
-# pre_condition: $VM is set to a config file for xen
+# pre_condition: $VM_NAME is set to a config file for xen
 # update the vars to be used and REDIRECT stdout and stderr
 gather_info() {
-  VM_NAME=${VM##*/}
-
+	VM="${XEN_CONFIG}/${VM_NAME}"
 	# get the disk info
 	DISK=`grep -e "\bdisk\b" $VM`
 	DISK=`echo $DISK |cut -d':' -f2|cut -d',' -f1`
@@ -343,13 +342,13 @@ myaction=${myaction-install}
 # disable color if necessary
 $color || unset BLUE CYAN CYANN GREEN PURP OFF RED
 
+[ -d $XEN_PREFIX ] || mkdir -p $XEN_PREFIX
+[ -d $XEN_PREFIX/log ] || mkdir -p $XEN_PREFIX/log
+
 qprint
 mesg "${PURP}XEN_VM_Auto_Install ${OFF}${CYANN}${version}${OFF} ~ ${GREEN}http://www.alipay.com${OFF}"
 [ "$myaction" = version ] && { versinfo; exit 0; }
 [ "$myaction" = help ] && { versinfo; helpinfo; exit 0; }
-
-[ -d $XEN_PREFIX ] || mkdir -p $XEN_PREFIX
-[ -d $XEN_PREFIX/log ] || mkdir -p $XEN_PREFIX/log
 
 cat <<EOF > $PART_TABLE 
 o
@@ -407,9 +406,12 @@ case "$myaction" in
     *)
         die "Unknown action by $myaction."
 esac
+mesg $myaction
 
-for VM in $XEN_CONFIG_FILES ;do
+for VM_NAME in $XEN_CONFIG_FILES ;do
     xm list > /tmp/xm_list
+    gather_info
+mesg "Perpare for $VM_NAME"
     case "$myaction" in
         install)
             # if current VM is running, skip it
@@ -423,7 +425,6 @@ for VM in $XEN_CONFIG_FILES ;do
     esac
 
   # gather_info befor each install stage
-  gather_info
   prepare_disk
   untar_system
 	config_ip
