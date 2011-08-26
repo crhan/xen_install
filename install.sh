@@ -446,6 +446,7 @@ case "$myaction" in
         [ -z $XEN_CONFIG_FILES ] && XEN_CONFIG_FILES=$(cat $REINSTALL_FILE)
 		# search for config files
 		for temp in $XEN_CONFIG_FILES;do
+			temp=${temp##*/}
 			temp1=$( find $XEN_CONFIG -type f -name "$temp" -print )
 			if echo $temp2 | grep $temp1 ;then
 				continue
