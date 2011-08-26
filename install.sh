@@ -463,7 +463,6 @@ esac
 for VM in $XEN_CONFIG_FILES ;do
     xm list > /tmp/xm_list
     gather_info
-    mesg "Perpare for $VM_NAME_COLOR"
     case "$myaction" in
         install)
             # if current VM is running, skip it
@@ -481,6 +480,7 @@ for VM in $XEN_CONFIG_FILES ;do
     esac
 
   # gather_info befor each install stage
+  mesg "Perpare for $VM_NAME_COLOR"
   prepare_disk
   untar_system
 	config_ip
