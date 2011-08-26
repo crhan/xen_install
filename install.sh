@@ -10,41 +10,179 @@
 #	2011/08/23	ruohan.chen	First release
 #	2011/08/24	ruohan.chen	complete
 #
+version="v1.1"
 PATH="/sbin:/bin:/usr/sbin:/usr/bin"
 
 XEN_PREFIX="/tmp/xen_install"
 XEN_CONFIG="/etc/xen/auto"
+LOG="$XEN_PREFIX/log/install.log"
 PART_TABLE="$XEN_PREFIX/part-table"
 
-BASE_SYSTEM="http://10.253.75.1/xen/baserhsys-48-32.tar"
+SYSTEM_55_64="http://10.253.75.1/xen/baserhsys-55-64.tar"
+SYSTEM_48_32="http://10.253.75.1/xen/baserhsys-48-32.tar"
+BASE_SYSTEM=$SYSTEM_48_32
 BASE_SYSTEM_FILE="$XEN_PREFIX/${BASE_SYSTEM##*/}"
+STDOUT=6
+STDERR=7
+# backup STDOUT and STDERR
+exec 6>&1
+exec 7>&2
 
-function check_base_system_tar()
-{
-	[ -d $XEN_PREFIX ] || mkdir -p $XEN_PREFIX
+quietopt=false
+color=true
+unset myaction
+
+BLUE="[34;01m"
+CYAN="[36;01m"
+CYANN="[36m"
+GREEN="[32;01m"
+RED="[31;01m"
+PURP="[35;01m"
+OFF="[0m"
+
+# synopsis: qprint "message"
+qprint() {
+    $quietopt || echo "$*" >&$STDERR
+}
+
+# synopsis: mesg "message"
+# Prettily print something to stderr, honors quietopt
+mesg() {
+    qprint " ${GREEN}*${OFF} $*"
+    echo "`date "+%h %d %H:%M:%S"` `hostname`: $*" >> $LOG
+}
+
+# synopsis: warn "message"
+# Prettily print a warning to stderr
+warn() {
+    echo " ${RED}* Warning${OFF}: $*" >&$STDERR
+}
+
+# synopsis: error "message"
+# Prettily print an error
+error() {
+    echo " ${RED}* Error${OFF}: $*" >&$STDERR
+}
+
+# synopsis: die "message"
+# Prettily print an error, then abort
+die() {
+    [ -n "$1" ] && error "$*"
+    qprint
+    exit 1
+}
+
+# synopsis: versinfo
+# Display the version information
+versinfo() {
+    qprint
+    qprint "   Copyright ${CYANN}2011${OFF} Alipay, Inc;"
+    qprint
+}
+
+# synopsis: helpinfo
+# Display the help infomation.
+helpinfo() {
+	cat >&$STDOUT <<EOHELP
+SYNOPSIS
+    $(basename $0) [ ${GREEN}-hVr${OFF} ] [ ${GREEN}--version --help --nocolor --quite
+    --reinstall${OFF} ] < ${GREEN}--system${OFF} ${CYAN}mark${OFF} >
+
+    ${GREEN}--reinstall${OFF} ${CYAN}hostfile${OFF}
+        Reinstall VMs in given hostfile
+
+    ${GREEN}--nocolor${OFF}
+        Disable color hilighting for non ANSI-compatible terms.
+
+    ${GREEN}-h${OFF} ${GREEN}--help${OFF}
+        Show help that looks remarkably like this man-page. As of 2.6.10,
+        help is sent to stdout so it can be easily piped to a pager.
+
+    ${GREEN}-V${OFF} ${GREEN}--version${OFF}
+        Show version information.
+
+EOHELP
+}
+
+# synopsis: setaction
+# Sets $myaction or dies if $myaction is already set
+setaction() {
+    if [ -n "$myaction" ]; then
+        die "you can't specify --$myaction and --$1 at the same time"
+    else
+        myaction="$1"
+    fi
+}
+
+# synopsis: prepare_disk
+# pre_condition: gather_info() is run before it
+# use var defined in gather_info() to format label and mount disks
+prepare_disk() {
+	# create partition table for lv
+	cat $PART_TABLE| fdisk $DISK_PATH
+
+	# create device maps for partition table
+	kpartx -a $DISK_PATH
+
+	# format and label the partition
+	mkfs.ext3 /dev/mapper/${DISK_NAME}p1
+	mkfs.ext3 /dev/mapper/${DISK_NAME}p2
+	mkfs.ext3 /dev/mapper/${DISK_NAME}p5
+	mkswap -L SWAP /dev/mapper/${DISK_NAME}p3
+	e2label /dev/mapper/${DISK_NAME}p1 "/boot"
+	e2label /dev/mapper/${DISK_NAME}p2 "/"
+	e2label /dev/mapper/${DISK_NAME}p5 "/home"
+
+	# mount
+	[ -d ${VM_INSTALL_PATH} ] || mkdir -p ${VM_INSTALL_PATH}
+	mount /dev/mapper/${DISK_NAME}p2 ${VM_INSTALL_PATH}
+	[ -d ${VM_INSTALL_PATH}/boot ] || mkdir ${VM_INSTALL_PATH}/boot
+	[ -d ${VM_INSTALL_PATH}/home ] || mkdir ${VM_INSTALL_PATH}/home
+	mount /dev/mapper/${DISK_NAME}p1 ${VM_INSTALL_PATH}/boot
+	mount /dev/mapper/${DISK_NAME}p5 ${VM_INSTALL_PATH}/home
+	mesg "Format and Mount complete"
+}
+
+# synopsis: unmount_volumn
+# umount current volumn
+umount_volumn(){
+	sleep 1
+	umount -lf ${VM_INSTALL_PATH}/{boot,home,} 2>/dev/null
+	kpartx -d $DISK_PATH 2>/dev/null
+}
+
+check_base_system_tar() {
 	for i in $BASE_SYSTEM ;do
 		local file=${i##*/}
-		[ -f $XEN_PREFIX/$file ] || wget -O $XEN_PREFIX/$file $i
+		if ! [ -f $XEN_PREFIX/$file ];then
+		    mesg "Downloading system archive file"
+		    wget -O $XEN_PREFIX/$file $i
+    else
+        mesg "System archive file \"$XEN_PREFIX/$file\" exist"
+    fi
 		wget -O $XEN_PREFIX/${file}.MD5 ${i}.MD5
 	done
 
 	for md5 in $XEN_PREFIX/*.MD5; do
 		cd $XEN_PREFIX
 		# md5 check
+		mesg "MD5 checking"
 		if ! md5sum -c $md5; then
 			rm ${md5%%.MD5}
+			warn "MD5 check failed, re-download file again"
 			check_base_system_tar
 		fi
 	done
 }
 
-function guest_xen()
-{
+guest_xen() {
 	local HOST=`hostname`
 	local DMIDECODECMD=`which dmidecode`
 	local os_servicetag=`$DMIDECODECMD | grep "Serial Number" | head -1 | awk '{print $3}'`
 
 	wget -q -O /tmp/xen_guest  "http://10.253.33.2/xen_connect_xyx.php?&action=search_install&phyhost=$os_servicetag"
+
+	[ -d /etc/xen/auto ] || mkdir -p /etc/xen/auto	
 
 	for line in `cat /tmp/xen_guest`
 	do
@@ -67,99 +205,45 @@ on_reboot = 'restart'
 on_crash = 'restart'
 EOF
 	done
+	mesg "Generate `ls $XEN_CONFIG|wc -l` VMs"
 }
 
-[ -d $XEN_PREFIX ] || mkdir -p $XEN_PREFIX
-[ -d $XEN_PREFIX/log ] || mkdir -p $XEN_PREFIX/log
-
-cat <<EOF > $PART_TABLE 
-o
-n
-p
-1
-
-+250M
-a
-1
-n
-p
-2
-
-+15G
-n
-p
-3
-
-+2G
-t
-3
-82
-n
-e
-4
-
-
-n
-l
-
-
-p
-w
-EOF
-
-check_base_system_tar
-
-guest_xen
-
-for VM in $XEN_CONFIG/*;do
-	# if current VM is running, skip it
-	xm list > /tmp/xm_list
-	grep "${VM##*/}" /tmp/xm_list && continue
-
-	echo "	Installing ${VM##*/}"
-
+# synopsis: gather_info
+# pre_condition: $VM_NAME is set to a config file for xen
+# update the vars to be used and REDIRECT stdout and stderr
+gather_info() {
+	VM="${XEN_CONFIG}/${VM_NAME}"
 	# get the disk info
 	DISK=`grep -e "\bdisk\b" $VM`
 	DISK=`echo $DISK |cut -d':' -f2|cut -d',' -f1`
-
-	# get the MAC info
-	MAC=`cat $VM|grep -e '\bvif\b'|cut -d"=" -f3|cut -d"," -f1`
-
-	# make and mount lv's partition
 	DISK_GROUP="${DISK%%/*}"
 	DISK_NAME="${DISK##*/}"
 	DISK_PATH="/dev/${DISK_GROUP}/${DISK_NAME}"
-	VM_INSTALL_PATH="$XEN_PREFIX/${VM##*/}"
+	VM_INSTALL_PATH="$XEN_PREFIX/${VM_NAME}"
 
-	# create partition table for lv
-	cat $PART_TABLE| fdisk $DISK_PATH >> $XEN_PREFIX/log/fdisk
+	# get mac info
+	MAC=`cat $VM|grep -e '\bvif\b'|cut -d"=" -f3|cut -d"," -f1`
 
-	# create device maps for partition table
-	kpartx -a $DISK_PATH
+  # redirect STDOUT and STDERR
+	VM_LOG="$XEN_PREFIX/log/${VM_NAME}.log"
+	VM_ERROR_LOG="$XEN_PREFIX/log/${VM_NAME}.error"
+  exec 1>>$VM_LOG
+  exec 2>&1
 
-	# format and label the partition
-	mkfs.ext3 /dev/mapper/${DISK_NAME}p1 > $XEN_PREFIX/log/mkfs.${DISK_NAME}
-	mkfs.ext3 /dev/mapper/${DISK_NAME}p2 > $XEN_PREFIX/log/mkfs.${DISK_NAME}
-	mkfs.ext3 /dev/mapper/${DISK_NAME}p5 > $XEN_PREFIX/log/mkfs.${DISK_NAME}
-	mkswap -L SWAP /dev/mapper/${DISK_NAME}p3
-	e2label /dev/mapper/${DISK_NAME}p1 "/boot"
-	e2label /dev/mapper/${DISK_NAME}p2 "/"
-	e2label /dev/mapper/${DISK_NAME}p5 "/home"
+	mesg "Installing ${VM_NAME}"
+}
 
-	# mount
-	mkdir -p ${VM_INSTALL_PATH}
-	mount /dev/mapper/${DISK_NAME}p2 ${VM_INSTALL_PATH}
-	mkdir ${VM_INSTALL_PATH}/boot
-	mkdir ${VM_INSTALL_PATH}/home
-	mount /dev/mapper/${DISK_NAME}p1 ${VM_INSTALL_PATH}/boot
-	mount /dev/mapper/${DISK_NAME}p5 ${VM_INSTALL_PATH}/home
-	echo "	Format and Mount complete"
-
-	# untar the base system
-	echo "	Untaring system"
+# synopsis: untar_system
+# untar tar archive to install path
+untar_system() {
+	mesg "Untaring system"
 	tar xf $BASE_SYSTEM_FILE -C ${VM_INSTALL_PATH}
-	
-	# config ip for new system
+	mesg "Untar complete"
+}
+
+# synopsis: config_ip
+# configure new IP and hostname
+config_ip() {
     wget -q -O /tmp/host_info  "http://10.253.33.2/xen_connect_xyx.php?action=search_host&mac=${MAC}"
     HOST_NAME=`head -n 1 /tmp/host_info |awk -F: '{print $1}'`
     IP_ADDR=`head -n 1 /tmp/host_info |awk -F: '{print $2}'`
@@ -213,11 +297,144 @@ ONBOOT=yes
 USERCTL=no
 EOF
   fi
+	mesg "Configuring network complete"
+}
 
-	echo "	Configuring network complete"
-
-	umount -lf ${VM_INSTALL_PATH}/{boot,home,}
-	kpartx -d $DISK_PATH
+# synopsis: start_vm
+# nothing to say
+start_vm() {
 	xm create $VM
-	echo "Install ${VM##*/} complete"
+	mesg "Install ${VM_NAME} complete"
+}
+
+###################################
+#                                 #
+#            Main Part            #
+#                                 #
+###################################
+
+
+# Parse the command-line
+while [ -n "$1" ]; do
+	case "$1" in
+		--help|-h)
+			setaction help
+			;;
+		--reinstall)
+			shift
+			setaction reinstall
+			if [ -n "$1" ]; then
+				REINSTALL_FILE=$1;
+				[ -f "$REINSTALL_FILE" ] || die "Reinstall file $REINSTALL_FILE does not exist."
+				XEN_CONFIG_FILES=`cat $REINSTALL_FILE`
+			else
+				die "--reinstall requires a file with hostname in each line."
+			fi
+			;;
+		--version|-V)
+			setaction version
+			;;
+		--nocolor)
+			color=false
+			;;
+	esac
+	shift
 done
+
+# default action is install all none active vm
+myaction=${myaction-install}
+
+# disable color if necessary
+$color || unset BLUE CYAN CYANN GREEN PURP OFF RED
+
+[ -d $XEN_PREFIX ] || mkdir -p $XEN_PREFIX
+[ -d $XEN_PREFIX/log ] || mkdir -p $XEN_PREFIX/log
+
+qprint
+mesg "${PURP}XEN_VM_Auto_Install ${OFF}${CYANN}${version}${OFF} ~ ${GREEN}http://www.alipay.com${OFF}"
+[ "$myaction" = version ] && { versinfo; exit 0; }
+[ "$myaction" = help ] && { versinfo; helpinfo; exit 0; }
+
+cat <<EOF > $PART_TABLE 
+o
+n
+p
+1
+
++250M
+a
+1
+n
+p
+2
+
++15G
+n
+p
+3
+
++2G
+t
+3
+82
+n
+e
+4
+
+
+n
+l
+
+
+p
+w
+EOF
+
+# redirect all STDOUT and STDERR
+exec 1>$XEN_PREFIX/log/pre.log
+exec 2>&1
+
+check_base_system_tar
+guest_xen
+
+# Set up traps
+# umount volumn when catching signal 1 9 15
+trap 'umount_volumn; exit 1' 1 9 15
+
+case "$myaction" in
+    install)
+        XEN_CONFIG_FILES=`ls $XEN_CONFIG`
+        ;;
+    reinstall)
+        ;;
+    *)
+        die "Unknown action by $myaction."
+esac
+
+for VM_NAME in $XEN_CONFIG_FILES ;do
+    xm list > /tmp/xm_list
+    gather_info
+    mesg "Perpare for $VM_NAME"
+    case "$myaction" in
+        install)
+            # if current VM is running, skip it
+            grep "${VM_NAME}" /tmp/xm_list && continue
+            ;;
+        reinstall)
+            if grep "${VM_NAME}" /tmp/xm_list; then
+                xm destroy ${VM_NAME} || die "destory ${VM_NAME} failed"
+            fi
+            ;;
+    esac
+
+  # gather_info befor each install stage
+  prepare_disk
+  untar_system
+	config_ip
+	umount_volumn
+	start_vm
+
+	exec 1>>$XEN_PREFIX/log/unexpected.log
+	exec 2>&1
+done
+
