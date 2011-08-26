@@ -163,9 +163,8 @@ prepare_disk() {
 # synopsis: unmount_volumn
 # umount current volumn
 umount_volumn(){
-	sleep 1
-	umount -lf ${VM_INSTALL_PATH}/{boot,home,} 2>/dev/null
-	kpartx -d $DISK_PATH 2>/dev/null
+	umount -lf ${VM_INSTALL_PATH}/{boot,home,}
+	kpartx -d $DISK_PATH
 }
 
 # synopsis: check_base_system_tar
@@ -233,10 +232,9 @@ EOF
 }
 
 # synopsis: gather_info
-# pre_condition: $VM_NAME is set to a config file for xen
+# pre_condition: $VM is set to a config file for xen
 # update the vars to be used and REDIRECT stdout and stderr
 gather_info() {
-	VM="${XEN_CONFIG}/${VM_NAME}"
 	VM_NAME="${VM##*/}"
 	VM_NAME_COLOR="${BLUE}${VM_NAME}${OFF}"
 	# get the disk info
@@ -440,7 +438,10 @@ guest_xen
 
 # Set up traps
 # umount volumn when catching signal 1 9 15
-trap 'umount_volumn; exit 1' 1 9 15
+trap '{
+umount_volumn
+} &
+exit 1' 1 2 3 9 15
 
 case "$myaction" in
     install)
@@ -451,7 +452,8 @@ case "$myaction" in
 		# search for config files
 		for temp in "$XEN_CONFIG_FILES";do
 			temp="${temp##*/}"
-			temp1=$( find $XEN_CONFIG -type f -name "$temp" -print )			if echo $temp2 | grep $temp1 ;then
+			temp1=$( find $XEN_CONFIG -type f -name "$temp" -print )
+			if echo $temp2 | grep $temp1 ;then
 				continue
 			fi
 			temp2=${temp2+$temp2 }${temp1}
@@ -463,7 +465,7 @@ case "$myaction" in
 esac
 
 
-for VM in $XEN_CONFIG_FILES ;do
+for VM in "$XEN_CONFIG_FILES" ;do
     xm list > /tmp/xm_list
     gather_info
     case "$myaction" in
