@@ -235,7 +235,9 @@ EOF
 # pre_condition: $VM_NAME is set to a config file for xen
 # update the vars to be used and REDIRECT stdout and stderr
 gather_info() {
+	VM_NAME="${VM_NAME##*/}"
 	VM="${XEN_CONFIG}/${VM_NAME}"
+	VM_NAME_COLOR="${BLUE}${VM_NAME}${OFF}"
 	# get the disk info
 	DISK=`grep -e "\bdisk\b" $VM`
 	DISK=`echo $DISK |cut -d':' -f2|cut -d',' -f1`
@@ -253,7 +255,7 @@ gather_info() {
   exec 1>>$VM_LOG
   exec 2>&1
 
-	mesg "Start install ${VM_NAME}"
+	mesg "Start install ${VM_NAME_COLOR}"
 }
 
 # synopsis: untar_system
@@ -326,9 +328,9 @@ EOF
 # synopsis: start_vm
 # nothing to say
 start_vm() {
-	mesg "Starting VM ${VM_NAME}"
+	mesg "Starting VM ${VM_NAME_COLOR}"
 	xm create $VM
-	mesg "Install ${VM_NAME} complete"
+	mesg "Install ${VM_NAME_COLOR} complete"
 }
 
 ###################################
@@ -449,19 +451,19 @@ esac
 for VM_NAME in $XEN_CONFIG_FILES ;do
     xm list > /tmp/xm_list
     gather_info
-    mesg "Perpare for $VM_NAME"
+    mesg "Perpare for $VM_NAME_COLOR"
     case "$myaction" in
         install)
             # if current VM is running, skip it
             if grep "${VM_NAME}" /tmp/xm_list;then
-                warn "VM ${VM_NAME} is RUNNING, skip it"
+                warn "VM ${VM_NAME_COLOR} is RUNNING, skip it"
                 continue
             fi
             ;;
         reinstall)
             if grep "${VM_NAME}" /tmp/xm_list; then
-                mesg "VM ${VM_NAME} is RUNNING, destroy it"
-                xm destroy ${VM_NAME} || die "destory ${VM_NAME} failed"
+                mesg "VM ${VM_NAME_COLOR} is RUNNING, destroy it"
+                xm destroy ${VM_NAME} || die "destory ${VM_NAME_COLOR} failed"
             fi
             ;;
     esac
