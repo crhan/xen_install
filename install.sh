@@ -49,6 +49,7 @@ qprint() {
 
 # synopsis: logger "message"
 logger() {
+	[ -d "$(dirname $LOG)" ] || mkdir -p "$(dirname $LOG)"
 	echo "`date "+%h %d %H:%M:%S"` `hostname`: $*" >> $LOG
 }
 
@@ -179,10 +180,10 @@ check_base_system_tar() {
     else
         mesg "System archive file \"$XEN_PREFIX/$file\" exist"
     fi
-		checksum && wget -O $XEN_PREFIX/${file}.MD5 ${i}.MD5
+		$checksum && wget -O $XEN_PREFIX/${file}.MD5 ${i}.MD5
 	done
 
-	checksum || return 0
+	$checksum || return 0
 	for md5 in $XEN_PREFIX/*.MD5; do
 		# md5 check
 		mesg "MD5 checking"
@@ -373,6 +374,9 @@ while [ -n "$1" ]; do
 		--nochecksum)
 			checksum=false
 			;;
+		*)
+			die "Unknown option: $1"
+			;;
 	esac
 	shift
 done
@@ -443,12 +447,11 @@ case "$myaction" in
         XEN_CONFIG_FILES=$(find $XEN_CONFIG -type f)
         ;;
     reinstall)
-        [ -z $XEN_CONFIG_FILES ] && XEN_CONFIG_FILES=$(cat $REINSTALL_FILE)
+        [ -z "$XEN_CONFIG_FILES" ] && XEN_CONFIG_FILES=$(cat $REINSTALL_FILE)
 		# search for config files
-		for temp in $XEN_CONFIG_FILES;do
-			temp=${temp##*/}
-			temp1=$( find $XEN_CONFIG -type f -name "$temp" -print )
-			if echo $temp2 | grep $temp1 ;then
+		for temp in "$XEN_CONFIG_FILES";do
+			temp="${temp##*/}"
+			temp1=$( find $XEN_CONFIG -type f -name "$temp" -print )			if echo $temp2 | grep $temp1 ;then
 				continue
 			fi
 			temp2=${temp2+$temp2 }${temp1}
