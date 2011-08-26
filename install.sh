@@ -425,7 +425,7 @@ EOF
 
 # redirect all STDOUT and STDERR
 exec 1>$XEN_PREFIX/log/pre.log
-exec 2>$XEN_PREFIX/log/pre.error
+exec 2>&1
 
 mesg "Start installing"
 check_base_system_tar
