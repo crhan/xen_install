@@ -102,7 +102,7 @@ SYNOPSIS
 
     ${GREEN}--reinstall-hosts${OFF} ${CYAN}hosts${OFF}
         Reinstall VMs in given string with hostname seperate by
-        whitespace
+        whitespace, shell style wildcare is supported
 
     ${GREEN}--nocolor${OFF}
         Disable color hilighting for non ANSI-compatible terms.
@@ -123,7 +123,7 @@ EOHELP
 # synopsis: setaction action
 # Sets $myaction or dies if $myaction is already set
 setaction() {
-    if [ -n "$myaction" ] && [ "$myaction" = "$1" ]; then
+    if [ -n "$myaction" ] && [ "$myaction" != "$1" ]; then
         die "you can't specify --$myaction and --$1 at the same time"
     else
         myaction="$1"
@@ -235,8 +235,8 @@ EOF
 # pre_condition: $VM_NAME is set to a config file for xen
 # update the vars to be used and REDIRECT stdout and stderr
 gather_info() {
-	VM_NAME="${VM_NAME##*/}"
 	VM="${XEN_CONFIG}/${VM_NAME}"
+	VM_NAME="${VM##*/}"
 	VM_NAME_COLOR="${BLUE}${VM_NAME}${OFF}"
 	# get the disk info
 	DISK=`grep -e "\bdisk\b" $VM`
@@ -439,16 +439,26 @@ trap 'umount_volumn; exit 1' 1 9 15
 
 case "$myaction" in
     install)
-        XEN_CONFIG_FILES=$(ls $XEN_CONFIG)
+        XEN_CONFIG_FILES=$(find $XEN_CONFIG -type f)
         ;;
     reinstall)
         [ -z $XEN_CONFIG_FILES ] && XEN_CONFIG_FILES=$(cat $REINSTALL_FILE)
+		# search for config files
+		for temp in $XEN_CONFIG_FILES;do
+			temp1=$( find $XEN_CONFIG -type f -name "$temp" -print )
+			if echo $temp2 | grep $temp1 ;then
+				continue
+			fi
+			temp2=${temp2+$temp2 }${temp1}
+		done
+		XEN_CONFIG_FILES=$temp2
         ;;
     *)
         die "Unknown action by $myaction."
 esac
 
-for VM_NAME in $XEN_CONFIG_FILES ;do
+
+for VM in $XEN_CONFIG_FILES ;do
     xm list > /tmp/xm_list
     gather_info
     mesg "Perpare for $VM_NAME_COLOR"
