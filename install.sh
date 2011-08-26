@@ -326,6 +326,7 @@ while [ -n "$1" ]; do
 			if [ -n "$1" ]; then
 				REINSTALL_FILE=$1;
 				[ -f "$REINSTALL_FILE" ] || die "Reinstall file $REINSTALL_FILE does not exist."
+				XEN_CONFIG_FILES=`cat $REINSTALL_FILE`
 			else
 				die "--reinstall requires a file with hostname in each line."
 			fi
@@ -391,7 +392,7 @@ EOF
 
 # redirect all STDOUT and STDERR
 exec 1>$XEN_PREFIX/log/pre.log
-exec 2>$XEN_PREFIX/log/pre.error
+exec 2>&1
 
 check_base_system_tar
 guest_xen
@@ -405,7 +406,6 @@ case "$myaction" in
         XEN_CONFIG_FILES=`ls $XEN_CONFIG`
         ;;
     reinstall)
-        XEN_CONFIG_FILES=`cat $REINSTALL_FILE`
         ;;
     *)
         die "Unknown action by $myaction."
