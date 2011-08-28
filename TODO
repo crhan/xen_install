@@ -2,3 +2,4 @@ select installing system
 verbose
 quite
 clean
+print the install VM before start
