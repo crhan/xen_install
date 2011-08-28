@@ -10,7 +10,7 @@
 #   2011/08/25      @ruohanc    v1.2
 #   2011/08/26      @ruohanc    v1.3
 #
-version="v1.3"
+version="v1.3.1"
 PATH="/sbin:/bin:/usr/sbin:/usr/bin"
 
 CWD="$( cd "$( dirname "$0" )" && pwd )"
@@ -30,6 +30,7 @@ exec 6>&1
 exec 7>&2
 
 quietopt=false
+debug=false
 color=true
 checksum=true
 unset myaction
@@ -251,6 +252,19 @@ gather_info() {
   # redirect STDOUT and STDERR
     VM_LOG="$XEN_PREFIX/log/${VM_NAME}.log"
     VM_ERROR_LOG="$XEN_PREFIX/log/${VM_NAME}.error"
+
+    if $debug;then
+        mesg "VM: $VM
+        VM_NAME: $VM_NAME
+        VM_NAME_COLOR: $VM_NAME_COLOR
+        DISK: $DISK
+        DISK_GROUP: $DISK_GROUP
+        DISK_NAME: $DISK_NAME
+        DISK_PATH: $DISK_PATH
+        VM_INSTALL_PATH: $VM_INSTALL_PATH
+        MAC: $MAC
+        VM_LOG: $VM_LOG"
+    fi
   exec 1>>$VM_LOG
   exec 2>&1
 
@@ -465,7 +479,7 @@ case "$myaction" in
 esac
 
 
-for VM in "$XEN_CONFIG_FILES" ;do
+for VM in $XEN_CONFIG_FILES ;do
     xm list > /tmp/xm_list
     gather_info
     case "$myaction" in
