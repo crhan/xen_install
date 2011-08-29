@@ -31,6 +31,7 @@ exec 7>&2
 
 quietopt=false
 debug=false
+dryrun=false
 color=true
 checksum=true
 unset myaction
@@ -111,6 +112,12 @@ SYNOPSIS
 
     ${GREEN}--nochecksum${OFF}
         Disable MD5 check for the base system tar archive
+
+    ${GREEN}--dryrun${OFF}
+        Trying to generate the VM configs and print out VMs to be installed
+
+    ${GREEN}--debug${OFF}
+        Enable debug mode and output lots of info
 
     ${GREEN}-h${OFF} ${GREEN}--help${OFF}
         Show help that looks remarkably like this man-page. As of 2.6.10,
@@ -346,6 +353,24 @@ start_vm() {
     mesg "Install ${VM_NAME_COLOR} complete"
 }
 
+# synopsis: VM_to_install "VM_NAME"
+VM_to_install(){
+    mesg "Following VM(s) is gonna be installed:"
+    declare -i count=0
+    unset i;
+    for i in $1; do
+        if [ $count -eq 2 ]; then
+            mesg "    $VM_INSTALL_TEMP"
+            unset VM_INSTALL_TEMP
+            count=0;
+        else
+            count=$count+1
+        fi
+        VM_INSTALL_TEMP=${VM_INSTALL_TEMP+$VM_INSTALL_TEMP }${i}
+    done
+    mesg "    $VM_INSTALL_TEMP"
+    qprint
+}
 ###################################
 #                                 #
 #            Main Part            #
@@ -386,8 +411,16 @@ while [ -n "$1" ]; do
         --nochecksum)
             checksum=false
             ;;
-        *)
+        --dryrun)
+            dryrun=true
+            ;;
+        --debug)
+            debug=true
+            ;;
+        --*)
             die "Unknown option: $1"
+            ;;
+        *)
             ;;
     esac
     shift
@@ -478,6 +511,9 @@ case "$myaction" in
         die "Unknown action by $myaction."
 esac
 
+# print VMs which is going to be installed
+VM_to_install
+$dryrun && exit 0
 
 for VM in $XEN_CONFIG_FILES ;do
     xm list > /tmp/xm_list
