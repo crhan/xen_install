@@ -379,6 +379,11 @@ VM_to_install(){
 
 
 # Parse the command-line
+
+unset i
+args=$(getopt -l "help,reinstall-file:,reinstall-hosts:,version,nocolor,nochecksum,dryrun,debug" -o "hV" -n $0 -- $*)
+[ $? -eq 0 ] || die "Unknown options"
+set -- $args
 while [ -n "$1" ]; do
     case "$1" in
         --help|-h)
@@ -416,6 +421,8 @@ while [ -n "$1" ]; do
             ;;
         --debug)
             debug=true
+            ;;
+        --)
             ;;
         --*)
             die "Unknown option: $1"
