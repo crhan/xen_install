@@ -574,21 +574,20 @@ esac
 VM_to_install
 $dryrun && exit 0
 
+# install VM in $XEN_CONFIG_FILES recursively
 for VM in $XEN_CONFIG_FILES ;do
     xm list > /tmp/xm_list
     gather_info
     case "$myaction" in
         install)
-            # if current VM is running, skip it
-            if grep "${VM_NAME}" /tmp/xm_list;then
-                warn "VM ${VM_NAME_COLOR} is RUNNING, skip it"
-                continue
-            fi
-            ;;
-        reinstall)
             if grep "${VM_NAME}" /tmp/xm_list; then
-                mesg "VM ${VM_NAME_COLOR} is RUNNING, destroy it"
-                xm destroy ${VM_NAME} || die "destory ${VM_NAME_COLOR} failed"
+                if $force;then
+                    mesg "VM ${VM_NAME_COLOR} is RUNNING, destroy it"
+                    xm destroy ${VM_NAME} || die "destory ${VM_NAME_COLOR} failed"
+                else
+                    warn "VM ${VM_NAME_COLOR} is RUNNING, skip it"
+                    continue
+                fi
             fi
             ;;
     esac
