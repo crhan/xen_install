@@ -33,6 +33,7 @@ quietopt=false
 debug=false
 dryrun=false
 force=false
+verbose=false
 color=true
 checksum=true
 unset myaction
@@ -97,14 +98,39 @@ versinfo() {
 # synopsis: helpinfo
 # Display the help infomation.
 helpinfo() {
+    local name="${CYAN}$(basename $0)${OFF}"
     cat >&$STDOUT <<EOHELP
-${BLDWHT}SYNOPSIS${OFF}
-    $(basename $0) [ ${GREEN}-fhirCDF:SV${OFF} ] [ ${GREEN}--version --help --nocolor --quiet
-    --reinstall${OFF} ] < ${GREEN}--system${OFF} ${CYAN}mark${OFF} > [ ${BLUE}VM_Names${OFF} ]
+${BLDWHT}$(basename $0)${OFF}: Xen VM installing tool written for SA team @ Alipay, Inc.
+${BLDWHT}Usage${OFF}:
+    ${name} ${CYAN}--install${OFF} [ ${GREEN}options${OFF} ] < ${GREEN}--system${OFF} ${CYAN}Mark${OFF} > [ ${BLUE}VM_NAMEs${OFF} ]
+    ${name} ${CYAN}--help${OFF} [ ${GREEN}--verbose${OFF} ]
+    ${name} ${CYAN}--version${OFF}
+${BLDWHT}Options:${OFF} ${GREEN}-${OFF}[${GREEN} fhqrvCDF:SV ${OFF}]
+          [ ${GREEN}--nocolor${OFF}  ] [ ${GREEN}--nochecksum${OFF} ] [ ${GREEN}--quite${OFF}      ] [ ${GREEN}--force${OFF}      ]
+          [ ${GREEN}--dryrun${OFF}   ] [ ${GREEN}--debug${OFF}      ]
+          [ ${GREEN}--from-file${OFF} ${CYAN}hostfile${OFF}        ]
+${BLDWHT}Mark:${OFF}     ${CYAN}rh48_32${OFF}: ${SYSTEM_48_32}
+          ${CYAN}rh55_64${OFF}: ${SYSTEM_55_64}
+
+EOHELP
+if $verbose;then
+    cat >&$STDOUT <<EOHELP
+${CYAN}Help (this screen):${OFF}
+    ${GREEN}--help${OFF} (${GREEN}-h${OFF} short option)
+        Displays this help; an additional argument (see above) will tell
+        $(basename $0) to display detailed help.
 
     ${GREEN}--install${OFF} (${GREEN}-i${OFF} short option)
         Specify this option to install VMs
 
+    ${GREEN}--help${OFF} (${GREEN}-h${OFF} short option)
+        Show help that looks remarkably like this man-page. As of 2.6.10,
+        help is sent to stdout so it can be easily piped to a pager.
+
+    ${GREEN}--version${OFF} (${GREEN}-V${OFF} short option)
+        Show version information.
+
+${CYAN}Options:${OFF}
     ${GREEN}--force${OFF} (${GREEN}-f${OFF} short option)
         Force install appointed VMs regaredless of weather it is running or not
 
@@ -120,17 +146,21 @@ ${BLDWHT}SYNOPSIS${OFF}
     ${GREEN}--dryrun${OFF} (${GREEN}-r${OFF} short option)
         Trying to generate the VM configs and print out VMs to be installed
 
+    ${GREEN}--verbose${OFF} (${GREEN}-v${OFF} short option)
+        Make a lot of noise
+
     ${GREEN}--debug${OFF} (${GREEN}-D${OFF} short option)
         Enable debug mode and output lots of info
 
-    ${GREEN}--help${OFF} (${GREEN}-h${OFF} short option)
-        Show help that looks remarkably like this man-page. As of 2.6.10,
-        help is sent to stdout so it can be easily piped to a pager.
-
-    ${GREEN}--version${OFF} (${GREEN}-V${OFF} short option)
-        Show version information.
+    ${GREEN}--quiet${OFF} (${GREEN}-q${OFF} short option)
+        Disable normal message display to screen
 
 EOHELP
+else
+    cat >&$STDOUT <<EOHELP
+    For more help, try '$(basename $0) --help --verbose'
+EOHELP
+fi
 }
 
 # synopsis: setaction action
@@ -383,7 +413,7 @@ VM_to_install(){
 
 
 # Parse the command-line
-args=$(getopt -l "help,install,force,from-file:,version,nocolor,nochecksum,dryrun,debug,quiet" -o "fihrqFVCSD" -n $0 -- $*)
+args=$(getopt -l "help,install,force,from-file:,version,nocolor,nochecksum,dryrun,debug,verbose,quiet" -o "fhiqrvCDFSV" -n $(basename $0) -- $*)
 [ $? -eq 0 ] || die "Unknown options"
 set -- $args
 while [ -n "$1" ]; do
@@ -424,6 +454,9 @@ while [ -n "$1" ]; do
             ;;
         --quiet|-q)
             quietopt=true
+            ;;
+        --verbose|-v)
+            verbose=true
             ;;
         --)
             ;;
