@@ -28,7 +28,6 @@ exec 6>&1
 exec 7>&2
 
 quietopt=false
-debug=false
 dryrun=false
 force=false
 verbose=false
@@ -67,8 +66,8 @@ mesg() {
 # synopsis: warn "message"
 # Prettily print a warning to stderr
 warn() {
-    echo " ${RED}* Warning${OFF}: $*" >&$STDERR
-    logger " ${RED}* Warning${OFF}: $*"
+    echo " ${BLDYEL}* Warning${OFF}: $*" >&$STDERR
+    logger " ${BLDYEL}* Warning${OFF}: $*"
 }
 
 # synopsis: error "message"
@@ -404,10 +403,22 @@ VM_to_install(){
 #            Main Part            #
 #                                 #
 ###################################
-
+longopt="help,install:,force,from-file:,version,nocolor,nochecksum,dryrun,verbose,quiet,debug,nodebug"
+shortopt="fhi:qrvCDFSV"
+# Check if debug mode is set
+if echo "$*" | grep -e '--debug' -e '-D' >/dev/null; then
+    if echo "$*" |grep -e '--nodebug'; then
+        echo >/dev/null
+    else
+        warn "Entering debug mode"
+        sh -x $0 "$*" --nodebug
+        warn "Exiting debug mode"
+        exit 8
+    fi
+fi
 
 # Parse the command-line
-args=$(getopt -l "help,install:,force,from-file:,version,nocolor,nochecksum,dryrun,debug,verbose,quiet" -o "fhi:qrvCDFSV" -n $(basename $0) -- $*)
+args=$(getopt -l $longopt -o $shortopt -n $(basename $0) -- "$@")
 [ $? -eq 0 ] || die "Unknown options"
 set -- $args
 while [ -n "$1" ]; do
@@ -437,9 +448,6 @@ while [ -n "$1" ]; do
         --dryrun|-r)
             dryrun=true
             ;;
-        --debug|-D)
-            debug=true
-            ;;
         --force|-f)
             force=true
             ;;
@@ -464,6 +472,10 @@ while [ -n "$1" ]; do
                 die "Please refer to a given Mark or specify an http link"
             fi
             BASE_SYSTEM_FILE="$XEN_PREFIX/${BASE_SYSTEM##*/}"
+            ;;
+        --nodebug)
+            ;;
+        --debug|-D)
             ;;
         --)
             ;;
@@ -605,3 +617,4 @@ for VM in $XEN_CONFIG_FILES ;do
     qprint
 done
 mesg "All Finish"
+exit 0
