@@ -107,10 +107,18 @@ ${BLDWHT}Options:${OFF} ${GREEN}-${OFF}[${GREEN}fhqrvCDF:SV ${OFF}]
           [ ${GREEN}--nocolor${OFF}  ] [ ${GREEN}--nochecksum${OFF} ] [ ${GREEN}--quite${OFF}      ] [ ${GREEN}--force${OFF}      ]
           [ ${GREEN}--dryrun${OFF}   ] [ ${GREEN}--debug${OFF}      ]
           [ ${GREEN}--from-file${OFF} ${CYAN}hostfile${OFF}        ]
-${BLDWHT}Mark:${OFF}     ${CYAN}rh48_32${OFF}: ${SYSTEM_48_32}
-          ${CYAN}rh55_64${OFF}: ${SYSTEM_55_64}
-
+${BLDWHT}Mark:${OFF}
 EOHELP
+
+# print each variable with 'SYSTEM_' prefix, these vars are used to store
+# http links to system tar file
+for i in ${!SYSTEM_*}; do
+    cat >&$STDOUT <<EOHELP
+          ${CYAN}${i#SYSTEM_}${OFF}: ${!i}
+EOHELP
+done
+qprint
+
 if $verbose;then
     cat >&$STDOUT <<EOHELP
 ${CYAN}Help (this screen):${OFF}
@@ -211,7 +219,7 @@ umount_volumn(){
 check_base_system_tar() {
     local file=${BASE_SYSTEM##*/}
     if ! [ -f $BASE_SYSTEM_FILE ];then
-        mesg "Downloading system archive file"
+        mesg "Downloading system archive file from '${BLDYEL}${BASE_SYSTEM}${OFF}'"
         wget -O $BASE_SYSTEM_FILE $BASE_SYSTEM || die "Download failed with exit code $?. Please check the log file $XEN_PREFIX/log/pre.log"
     else
         mesg "System archive file \"$XEN_PREFIX/$file\" exist"
@@ -462,9 +470,9 @@ while [ -n "$1" ]; do
             shift
             unset temp
             unset i
-            temp=$(echo $1 | tr [:lower:] [:upper:])
-            i=SYSTEM_$temp
-            if echo ${!SYSTEM_*} | grep $i ; then
+            temp=$(echo $1 | cut -d"'" -f2 | tr [:lower:] [:upper:])
+            i=SYSTEM_${temp}
+            if echo ${!SYSTEM_*} | grep $i >/dev/null; then
                 BASE_SYSTEM=${!i}
             elif echo $1 |grep -e '^http://'; then
                 BASE_SYSTEM=$1
