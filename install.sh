@@ -21,8 +21,6 @@ PART_TABLE="$XEN_PREFIX/part-table"
 
 SYSTEM_55_64="http://10.253.75.1/xen/baserhsys-55-64.tar"
 SYSTEM_48_32="http://10.253.75.1/xen/baserhsys-48-32.tar"
-BASE_SYSTEM=$SYSTEM_48_32
-BASE_SYSTEM_FILE="$XEN_PREFIX/${BASE_SYSTEM##*/}"
 STDOUT=6
 STDERR=7
 # backup STDOUT and STDERR
@@ -214,16 +212,14 @@ umount_volumn(){
 # Download the chosen system archive file if not exist
 # then check the MD5 sum if $checksum is true
 check_base_system_tar() {
-    for i in $BASE_SYSTEM ;do
-        local file=${i##*/}
-        if ! [ -f $XEN_PREFIX/$file ];then
-            mesg "Downloading system archive file"
-            wget -O $XEN_PREFIX/$file $i
+    local file=${BASE_SYSTEM##*/}
+    if ! [ -f $BASE_SYSTEM_FILE ];then
+        mesg "Downloading system archive file"
+        wget -O $BASE_SYSTEM_FILE $BASE_SYSTEM || die "Download failed with exit code $?. Please check the log file $XEN_PREFIX/log/pre.log"
     else
         mesg "System archive file \"$XEN_PREFIX/$file\" exist"
     fi
-        $checksum && wget -O $XEN_PREFIX/${file}.MD5 ${i}.MD5
-    done
+    $checksum && wget -O ${BASE_SYSTEM_FILE}.MD5 ${BASE_SYSTEM}.MD5 || die "MD5 file download failed with exit code $?. Please check the log file $XEN_PREFIX/log/pre.log"
 
     $checksum || return 0
     for md5 in $XEN_PREFIX/*.MD5; do
@@ -457,6 +453,21 @@ while [ -n "$1" ]; do
             ;;
         --verbose|-v)
             verbose=true
+            ;;
+        --system|-s)
+            shift
+            unset temp
+            unset i
+            temp=$(echo $1 | tr [:lower:] [:upper:])
+            i=SYSTEM_$temp
+            if echo ${!SYSTEM_*} | grep $i ; then
+                BASE_SYSTEM=${!i}
+            elif echo $1 |grep -e '^http://'; then
+                BASE_SYSTEM=$1
+            else
+                die "Please refer to a given Mark or specify an http link"
+            fi
+            BASE_SYSTEM_FILE="$XEN_PREFIX/${BASE_SYSTEM##*/}"
             ;;
         --)
             ;;
