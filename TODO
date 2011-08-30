@@ -1,5 +1,1 @@
-select installing system
-verbose
-quite
-clean
-print the install VM before start
+collect install info about failed and success
