@@ -90,7 +90,7 @@ die() {
 # Display the version information
 versinfo() {
     qprint
-    qprint "   Copyright ${CYANN}2011${OFF} @ruohanc;"
+    qprint "   Copyright ${CYANN}2011${OFF} @ruohanc <ruohan.chen@alipay.com>;"
     qprint
 }
 
@@ -99,7 +99,7 @@ versinfo() {
 helpinfo() {
     cat >&$STDOUT <<EOHELP
 ${BLDWHT}SYNOPSIS${OFF}
-    $(basename $0) [ ${GREEN}-fhirCDF:SV${OFF} ] [ ${GREEN}--version --help --nocolor --quite
+    $(basename $0) [ ${GREEN}-fhirCDF:SV${OFF} ] [ ${GREEN}--version --help --nocolor --quiet
     --reinstall${OFF} ] < ${GREEN}--system${OFF} ${CYAN}mark${OFF} > [ ${BLUE}VM_Names${OFF} ]
 
     ${GREEN}--install${OFF} (${GREEN}-i${OFF} short option)
@@ -383,9 +383,8 @@ VM_to_install(){
 
 
 # Parse the command-line
-args=$(getopt -l "help,install,force,from-file:,version,nocolor,nochecksum,dryrun,debug" -o "fihrFVCSD" -n $0 -- $*)
+args=$(getopt -l "help,install,force,from-file:,version,nocolor,nochecksum,dryrun,debug,quiet" -o "fihrqFVCSD" -n $0 -- $*)
 [ $? -eq 0 ] || die "Unknown options"
-mesg $args
 set -- $args
 while [ -n "$1" ]; do
     case "$1" in
@@ -422,6 +421,9 @@ while [ -n "$1" ]; do
             ;;
         --install|-i)
             setaction install
+            ;;
+        --quiet|-q)
+            quietopt=true
             ;;
         --)
             ;;
