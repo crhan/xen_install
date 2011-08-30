@@ -43,6 +43,7 @@ GREEN="[32;01m"
 RED="[31;01m"
 PURP="[35;01m"
 BLDWHT="[37;01m"
+BLDYEL="[33;01m"
 OFF="[0m"
 
 # synopsis: qprint "message"
@@ -100,10 +101,10 @@ helpinfo() {
     cat >&$STDOUT <<EOHELP
 ${BLDWHT}$(basename $0)${OFF}: Xen VM installing tool written for SA team @ Alipay, Inc.
 ${BLDWHT}Usage${OFF}:
-    ${name} ${CYAN}--install${OFF} [ ${GREEN}options${OFF} ] < ${GREEN}--system${OFF} ${CYAN}Mark${OFF} > [ ${BLUE}VM_NAMEs${OFF} ]
-    ${name} ${CYAN}--help${OFF} [ ${GREEN}--verbose${OFF} ]
-    ${name} ${CYAN}--version${OFF}
-${BLDWHT}Options:${OFF} ${GREEN}-${OFF}[${GREEN} fhqrvCDF:SV ${OFF}]
+    ${name} ${BLDYEL}--install${OFF} ${CYAN}Mark${OFF} [ ${GREEN}options${OFF} ] [ ${BLUE}VM_NAMEs${OFF} ]
+    ${name} ${BLDYEL}--help${OFF} [ ${GREEN}--verbose${OFF} ]
+    ${name} ${BLDYEL}--version${OFF}
+${BLDWHT}Options:${OFF} ${GREEN}-${OFF}[${GREEN}fhqrvCDF:SV ${OFF}]
           [ ${GREEN}--nocolor${OFF}  ] [ ${GREEN}--nochecksum${OFF} ] [ ${GREEN}--quite${OFF}      ] [ ${GREEN}--force${OFF}      ]
           [ ${GREEN}--dryrun${OFF}   ] [ ${GREEN}--debug${OFF}      ]
           [ ${GREEN}--from-file${OFF} ${CYAN}hostfile${OFF}        ]
@@ -118,12 +119,9 @@ ${CYAN}Help (this screen):${OFF}
         Displays this help; an additional argument (see above) will tell
         $(basename $0) to display detailed help.
 
-    ${GREEN}--install${OFF} (${GREEN}-i${OFF} short option)
+    ${GREEN}--install${OFF} ${CYAN}Mark${OFF} (${GREEN}-i${OFF} short option)
         Specify this option to install VMs
-
-    ${GREEN}--help${OFF} (${GREEN}-h${OFF} short option)
-        Show help that looks remarkably like this man-page. As of 2.6.10,
-        help is sent to stdout so it can be easily piped to a pager.
+        Marks could be ${CYAN}choise${OFF} given above or a ${CYAN}http link${OFF} start with 'http://'
 
     ${GREEN}--version${OFF} (${GREEN}-V${OFF} short option)
         Show version information.
@@ -409,7 +407,7 @@ VM_to_install(){
 
 
 # Parse the command-line
-args=$(getopt -l "help,install,force,from-file:,version,nocolor,nochecksum,dryrun,debug,verbose,quiet" -o "fhiqrvCDFSV" -n $(basename $0) -- $*)
+args=$(getopt -l "help,install:,force,from-file:,version,nocolor,nochecksum,dryrun,debug,verbose,quiet" -o "fhi:qrvCDFSV" -n $(basename $0) -- $*)
 [ $? -eq 0 ] || die "Unknown options"
 set -- $args
 while [ -n "$1" ]; do
@@ -420,9 +418,9 @@ while [ -n "$1" ]; do
         --from-file|-F)
             shift
             if [ -n "$1" ]; then
-                INSTALL_FILE=$1;
-                [ -f "$INSTALL_FILE" ] || die "Install file $INSTALL_FILE does not exist."
-                XEN_CONFIG_FILES=`cat $INSTALL_FILE`
+                HOSTFILE=$1;
+                [ -f "$HOSTFILE" ] || die "Install file $HOSTFILE does not exist."
+                XEN_CONFIG_FILES=`cat $HOSTFILE`
             else
                 die "--from-file requires a file with hostname in each line."
             fi
@@ -445,16 +443,14 @@ while [ -n "$1" ]; do
         --force|-f)
             force=true
             ;;
-        --install|-i)
-            setaction install
-            ;;
         --quiet|-q)
             quietopt=true
             ;;
         --verbose|-v)
             verbose=true
             ;;
-        --system|-s)
+        --install|-i)
+            setaction install
             shift
             unset temp
             unset i
@@ -549,11 +545,17 @@ exit 1' 1 2 3 9 15
 
 case "$myaction" in
     install)
-        XEN_CONFIG_FILES=$(find $XEN_CONFIG -type f)
-        ;;
-    reinstall)
-        [ -z "$XEN_CONFIG_FILES" ] && XEN_CONFIG_FILES=$(cat $INSTALL_FILE)
-        # search for config files
+        # if VM_NAMEs appointed then install those VMs
+        # if no VM_NAMEs appointed then find all of the xen configs
+        # if no VM_NAMEs appointed but hostfile specified, read file and install those VMs in file
+        if [ -z "$XEN_CONFIG_FILES" ];then
+            if [ -z "$HOSTFILE" ];then
+                XEN_CONFIG_FILES=$(find $XEN_CONFIG -type f)
+            else
+                XEN_CONFIG_FILES=$(cat $HOSTFILE)
+            fi
+        fi
+        # search for the existing given VM configs and save for install
         for temp in "$XEN_CONFIG_FILES";do
             temp="${temp##*/}"
             temp1=$( find $XEN_CONFIG -type f -name "$temp" -print )
