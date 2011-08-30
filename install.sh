@@ -32,6 +32,7 @@ exec 7>&2
 quietopt=false
 debug=false
 dryrun=false
+force=false
 color=true
 checksum=true
 unset myaction
@@ -42,6 +43,7 @@ CYANN="[36m"
 GREEN="[32;01m"
 RED="[31;01m"
 PURP="[35;01m"
+BLDWHT="[37;01m"
 OFF="[0m"
 
 # synopsis: qprint "message"
@@ -96,40 +98,43 @@ versinfo() {
 # Display the help infomation.
 helpinfo() {
     cat >&$STDOUT <<EOHELP
-SYNOPSIS
-    $(basename $0) [ ${GREEN}-hVr${OFF} ] [ ${GREEN}--version --help --nocolor --quite
-    --reinstall${OFF} ] < ${GREEN}--system${OFF} ${CYAN}mark${OFF} >
+${BLDWHT}SYNOPSIS${OFF}
+    $(basename $0) [ ${GREEN}-fhirCDF:SV${OFF} ] [ ${GREEN}--version --help --nocolor --quite
+    --reinstall${OFF} ] < ${GREEN}--system${OFF} ${CYAN}mark${OFF} > [ ${BLUE}VM_Names${OFF} ]
 
-    ${GREEN}--reinstall-file${OFF} ${CYAN}hostfile${OFF}
-        Reinstall VMs in given hostfile
+    ${GREEN}--install${OFF} (${GREEN}-i${OFF} short option)
+        Specify this option to install VMs
 
-    ${GREEN}--reinstall-hosts${OFF} ${CYAN}hosts${OFF}
-        Reinstall VMs in given string with hostname seperate by
-        whitespace, shell style wildcare is supported
+    ${GREEN}--force${OFF} (${GREEN}-f${OFF} short option)
+        Force install appointed VMs regaredless of weather it is running or not
 
-    ${GREEN}--nocolor${OFF}
+    ${GREEN}--from-file${OFF} ${CYAN}hostfile${OFF} (${GREEN}-F${OFF} short option)
+        Appoint install VMs in given file with hostname in each line
+
+    ${GREEN}--nocolor${OFF} (${GREEN}-C${OFF} short option)
         Disable color hilighting for non ANSI-compatible terms.
 
-    ${GREEN}--nochecksum${OFF}
+    ${GREEN}--nochecksum${OFF} (${GREEN}-S${OFF} short option)
         Disable MD5 check for the base system tar archive
 
-    ${GREEN}--dryrun${OFF}
+    ${GREEN}--dryrun${OFF} (${GREEN}-r${OFF} short option)
         Trying to generate the VM configs and print out VMs to be installed
 
-    ${GREEN}--debug${OFF}
+    ${GREEN}--debug${OFF} (${GREEN}-D${OFF} short option)
         Enable debug mode and output lots of info
 
-    ${GREEN}-h${OFF} ${GREEN}--help${OFF}
+    ${GREEN}--help${OFF} (${GREEN}-h${OFF} short option)
         Show help that looks remarkably like this man-page. As of 2.6.10,
         help is sent to stdout so it can be easily piped to a pager.
 
-    ${GREEN}-V${OFF} ${GREEN}--version${OFF}
+    ${GREEN}--version${OFF} (${GREEN}-V${OFF} short option)
         Show version information.
 
 EOHELP
 }
 
 # synopsis: setaction action
+# known actions: install help version
 # Sets $myaction or dies if $myaction is already set
 setaction() {
     if [ -n "$myaction" ] && [ "$myaction" != "$1" ]; then
@@ -258,7 +263,6 @@ gather_info() {
 
   # redirect STDOUT and STDERR
     VM_LOG="$XEN_PREFIX/log/${VM_NAME}.log"
-    VM_ERROR_LOG="$XEN_PREFIX/log/${VM_NAME}.error"
 
     if $debug;then
         mesg "VM: $VM
@@ -379,48 +383,45 @@ VM_to_install(){
 
 
 # Parse the command-line
-
-unset i
-args=$(getopt -l "help,reinstall-file:,reinstall-hosts:,version,nocolor,nochecksum,dryrun,debug" -o "hV" -n $0 -- $*)
+args=$(getopt -l "help,install,force,from-file:,version,nocolor,nochecksum,dryrun,debug" -o "fihrFVCSD" -n $0 -- $*)
 [ $? -eq 0 ] || die "Unknown options"
+mesg $args
 set -- $args
 while [ -n "$1" ]; do
     case "$1" in
         --help|-h)
             setaction help
             ;;
-        --reinstall-file)
+        --from-file|-F)
             shift
-            setaction reinstall
             if [ -n "$1" ]; then
-                REINSTALL_FILE=$1;
-                [ -f "$REINSTALL_FILE" ] || die "Reinstall file $REINSTALL_FILE does not exist."
-                XEN_CONFIG_FILES=`cat $REINSTALL_FILE`
+                INSTALL_FILE=$1;
+                [ -f "$INSTALL_FILE" ] || die "Install file $INSTALL_FILE does not exist."
+                XEN_CONFIG_FILES=`cat $INSTALL_FILE`
             else
-                die "--reinstall requires a file with hostname in each line."
-            fi
-            ;;
-        --reinstall-hosts)
-            shift
-            setaction reinstall
-            if [ -n "$1" ]; then
-                XEN_CONFIG_FILES=${XEN_CONFIG_FILES+$XEN_CONFIG_FILES }${1}
+                die "--from-file requires a file with hostname in each line."
             fi
             ;;
         --version|-V)
             setaction version
             ;;
-        --nocolor)
+        --nocolor|-C)
             color=false
             ;;
-        --nochecksum)
+        --nochecksum|-S)
             checksum=false
             ;;
-        --dryrun)
+        --dryrun|-r)
             dryrun=true
             ;;
-        --debug)
+        --debug|-D)
             debug=true
+            ;;
+        --force|-f)
+            force=true
+            ;;
+        --install|-i)
+            setaction install
             ;;
         --)
             ;;
@@ -428,13 +429,16 @@ while [ -n "$1" ]; do
             die "Unknown option: $1"
             ;;
         *)
+            if [ -n "$1" ]; then
+                XEN_CONFIG_FILES=${XEN_CONFIG_FILES+$XEN_CONFIG_FILES }${1}
+            fi
             ;;
     esac
     shift
 done
 
 # default action is install all none active vm
-myaction=${myaction-install}
+myaction=${myaction-help}
 
 # disable color if necessary
 $color || unset BLUE CYAN CYANN GREEN PURP OFF RED
@@ -502,7 +506,7 @@ case "$myaction" in
         XEN_CONFIG_FILES=$(find $XEN_CONFIG -type f)
         ;;
     reinstall)
-        [ -z "$XEN_CONFIG_FILES" ] && XEN_CONFIG_FILES=$(cat $REINSTALL_FILE)
+        [ -z "$XEN_CONFIG_FILES" ] && XEN_CONFIG_FILES=$(cat $INSTALL_FILE)
         # search for config files
         for temp in "$XEN_CONFIG_FILES";do
             temp="${temp##*/}"
