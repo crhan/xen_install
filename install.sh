@@ -12,7 +12,7 @@
 #   2011/08/27      @ruohanc    v1.3.1
 #   2011/08/31      @ruohanc    v2.0
 #
-version="v2.0"
+version="v2.0.1"
 PATH="/sbin:/bin:/usr/sbin:/usr/bin"
 
 CWD="$( cd "$( dirname "$0" )" && pwd )"
@@ -493,6 +493,7 @@ if echo $(getopt -l $longopt -o $shortopt -q -- "$@") | grep -e '--debug' -e '-D
     fi
 fi
 # redirect all STDOUT and STDERR
+[ -d $XEN_PREFIX/log ] || mkdir -p $XEN_PREFIX/log
 exec 1>$XEN_PREFIX/log/pre.log
 exec 2>&1
 
