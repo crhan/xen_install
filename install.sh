@@ -16,6 +16,7 @@ PATH="/sbin:/bin:/usr/sbin:/usr/bin"
 CWD="$( cd "$( dirname "$0" )" && pwd )"
 XEN_PREFIX="/tmp/xen_install"
 XEN_CONFIG="/etc/xen/auto"
+XM_LIST="${XEN_PREFIX/xm_list}"
 LOG="$XEN_PREFIX/log/install.log"
 PART_TABLE="$XEN_PREFIX/part-table"
 
@@ -384,15 +385,16 @@ EOF
 # nothing to say
 start_vm() {
     mesg "Starting VM ${VM_NAME_COLOR}"
-    xm create $VM
+    xm create $VM || error "${VM_NAME_COLOR} start failed"
     mesg "Install ${VM_NAME_COLOR} complete"
 }
 
 # synopsis: VM_to_install "VM_NAME"
+# show the VMs which will be installed
 VM_to_install(){
     mesg "Following VM(s) is gonna be installed:"
-    declare -i count=0
     unset i;
+    declare -i count=0
     for i in $1; do
         if [ $count -eq 2 ]; then
             mesg "    $VM_INSTALL_TEMP"
@@ -401,10 +403,24 @@ VM_to_install(){
         else
             count=$count+1
         fi
-        VM_INSTALL_TEMP=${VM_INSTALL_TEMP+$VM_INSTALL_TEMP }${i}
+        VM_INSTALL_TEMP=${VM_INSTALL_TEMP+$VM_INSTALL_TEMP }${i##*/}
     done
     mesg "    $VM_INSTALL_TEMP"
     qprint
+}
+
+# synopsis: post_check $XEN_INSTALL_FILES
+# check all VM_NAME in $(xm list) and print out
+post_check(){
+    for i in $1; do
+        xm list > ${XM_LIST}
+        gather_info
+        if grep "${VM_NAME}" ${XM_LIST}; then
+            mesg "${VM_NAME_COLOR} started!"
+        else
+            error "${VM_NAME_COLOR} start failed"
+        fi
+    done
 }
 ###################################
 #                                 #
@@ -592,16 +608,16 @@ case "$myaction" in
 esac
 
 # print VMs which is going to be installed
-VM_to_install
+VM_to_install $XEN_CONFIG_FILES
 $dryrun && exit 0
 
 # install VM in $XEN_CONFIG_FILES recursively
 for VM in $XEN_CONFIG_FILES ;do
-    xm list > /tmp/xm_list
+    xm list > ${XM_LIST}
     gather_info
     case "$myaction" in
         install)
-            if grep "${VM_NAME}" /tmp/xm_list; then
+            if grep "${VM_NAME}" ${XM_LIST}; then
                 if $force;then
                     mesg "VM ${VM_NAME_COLOR} is RUNNING, destroy it"
                     xm destroy ${VM_NAME} || die "destory ${VM_NAME_COLOR} failed"
@@ -625,5 +641,8 @@ for VM in $XEN_CONFIG_FILES ;do
     exec 2>&1
     qprint
 done
+
+# post check for all installed VMs
+post_check $XEN_CONFIG_FILES
 mesg "All Finish"
 exit 0
