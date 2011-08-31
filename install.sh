@@ -9,20 +9,21 @@
 #   2011/08/24      @ruohanc    v1.1
 #   2011/08/25      @ruohanc    v1.2
 #   2011/08/26      @ruohanc    v1.3
+#   2011/08/27      @ruohanc    v1.3.1
+#   2011/08/31      @ruohanc    v2.0
 #
-version="v1.3.1"
+version="v2.0"
 PATH="/sbin:/bin:/usr/sbin:/usr/bin"
 
 CWD="$( cd "$( dirname "$0" )" && pwd )"
 XEN_PREFIX="/tmp/xen_install"
 XEN_CONFIG="/etc/xen/auto"
+XM_LIST="${XEN_PREFIX}/xm_list"
 LOG="$XEN_PREFIX/log/install.log"
 PART_TABLE="$XEN_PREFIX/part-table"
 
 SYSTEM_55_64="http://10.253.75.1/xen/baserhsys-55-64.tar"
 SYSTEM_48_32="http://10.253.75.1/xen/baserhsys-48-32.tar"
-BASE_SYSTEM=$SYSTEM_48_32
-BASE_SYSTEM_FILE="$XEN_PREFIX/${BASE_SYSTEM##*/}"
 STDOUT=6
 STDERR=7
 # backup STDOUT and STDERR
@@ -30,6 +31,9 @@ exec 6>&1
 exec 7>&2
 
 quietopt=false
+dryrun=false
+force=false
+verbose=false
 debug=false
 color=true
 checksum=true
@@ -41,6 +45,8 @@ CYANN="[36m"
 GREEN="[32;01m"
 RED="[31;01m"
 PURP="[35;01m"
+BLDWHT="[37;01m"
+BLDYEL="[33;01m"
 OFF="[0m"
 
 # synopsis: qprint "message"
@@ -61,11 +67,18 @@ mesg() {
     logger " ${GREEN}*${OFF} $*"
 }
 
+# synopsis: info "message"
+# Prettily print a message like mesg() to stderr, but ignore quietopt
+info() {
+    echo " ${GREEN}*${OFF} $*" >&$STDERR
+    logger " ${GREEN}*${OFF} $*"
+}
+
 # synopsis: warn "message"
 # Prettily print a warning to stderr
 warn() {
-    echo " ${RED}* Warning${OFF}: $*" >&$STDERR
-    logger " ${RED}* Warning${OFF}: $*"
+    echo " ${BLDYEL}* Warning${OFF}: $*" >&$STDERR
+    logger " ${BLDYEL}* Warning${OFF}: $*"
 }
 
 # synopsis: error "message"
@@ -87,42 +100,85 @@ die() {
 # Display the version information
 versinfo() {
     qprint
-    qprint "   Copyright ${CYANN}2011${OFF} @ruohanc;"
+    qprint "   Copyright ${CYANN}2011${OFF} @ruohanc <ruohan.chen@alipay.com>;"
     qprint
 }
 
 # synopsis: helpinfo
 # Display the help infomation.
 helpinfo() {
+    local name="${CYAN}$(basename $0)${OFF}"
     cat >&$STDOUT <<EOHELP
-SYNOPSIS
-    $(basename $0) [ ${GREEN}-hVr${OFF} ] [ ${GREEN}--version --help --nocolor --quite
-    --reinstall${OFF} ] < ${GREEN}--system${OFF} ${CYAN}mark${OFF} >
+${BLDWHT}$(basename $0)${OFF}: Xen VM installing tool written for SA team @ Alipay, Inc.
+${BLDWHT}Usage${OFF}:
+    ${name} ${BLDYEL}--install${OFF} ${CYAN}Mark${OFF} [ ${GREEN}options${OFF} ] [ ${BLUE}VM_NAMEs${OFF} ]
+    ${name} ${BLDYEL}--help${OFF} [ ${GREEN}--verbose${OFF} ]
+    ${name} ${BLDYEL}--version${OFF}
+${BLDWHT}Options:${OFF} ${GREEN}-${OFF}[${GREEN}fhqrvCDF:SV ${OFF}]
+          [ ${GREEN}--nocolor${OFF}  ] [ ${GREEN}--nochecksum${OFF} ] [ ${GREEN}--quite${OFF}      ] [ ${GREEN}--force${OFF}      ]
+          [ ${GREEN}--dryrun${OFF}   ] [ ${GREEN}--debug${OFF}      ]
+          [ ${GREEN}--from-file${OFF} ${CYAN}hostfile${OFF}        ]
+${BLDWHT}Mark:${OFF}
+EOHELP
 
-    ${GREEN}--reinstall-file${OFF} ${CYAN}hostfile${OFF}
-        Reinstall VMs in given hostfile
+# print each variable with 'SYSTEM_' prefix, these vars are used to store
+# http links to system tar file
+for i in ${!SYSTEM_*}; do
+    cat >&$STDOUT <<EOHELP
+          ${CYAN}${i#SYSTEM_}${OFF}: ${!i}
+EOHELP
+done
+qprint
 
-    ${GREEN}--reinstall-hosts${OFF} ${CYAN}hosts${OFF}
-        Reinstall VMs in given string with hostname seperate by
-        whitespace, shell style wildcare is supported
+if $verbose;then
+    cat >&$STDOUT <<EOHELP
+${CYAN}Help (this screen):${OFF}
+    ${GREEN}--help${OFF} (${GREEN}-h${OFF} short option)
+        Displays this help; an additional argument (see above) will tell
+        $(basename $0) to display detailed help.
 
-    ${GREEN}--nocolor${OFF}
-        Disable color hilighting for non ANSI-compatible terms.
+    ${GREEN}--install${OFF} ${CYAN}Mark${OFF} (${GREEN}-i${OFF} short option)
+        Specify this option to install VMs
+        Marks could be ${CYAN}choise${OFF} given above or a ${CYAN}http link${OFF} start with 'http://'
 
-    ${GREEN}--nochecksum${OFF}
-        Disable MD5 check for the base system tar archive
-
-    ${GREEN}-h${OFF} ${GREEN}--help${OFF}
-        Show help that looks remarkably like this man-page. As of 2.6.10,
-        help is sent to stdout so it can be easily piped to a pager.
-
-    ${GREEN}-V${OFF} ${GREEN}--version${OFF}
+    ${GREEN}--version${OFF} (${GREEN}-V${OFF} short option)
         Show version information.
 
+${CYAN}Options:${OFF}
+    ${GREEN}--force${OFF} (${GREEN}-f${OFF} short option)
+        Force install appointed VMs regaredless of weather it is running or not
+
+    ${GREEN}--from-file${OFF} ${CYAN}hostfile${OFF} (${GREEN}-F${OFF} short option)
+        Appoint install VMs in given file with hostname in each line
+
+    ${GREEN}--nocolor${OFF} (${GREEN}-C${OFF} short option)
+        Disable color hilighting for non ANSI-compatible terms.
+
+    ${GREEN}--nochecksum${OFF} (${GREEN}-S${OFF} short option)
+        Disable MD5 check for the base system tar archive
+
+    ${GREEN}--dryrun${OFF} (${GREEN}-r${OFF} short option)
+        Trying to generate the VM configs and print out VMs to be installed
+
+    ${GREEN}--verbose${OFF} (${GREEN}-v${OFF} short option)
+        Make a lot of noise
+
+    ${GREEN}--debug${OFF} (${GREEN}-D${OFF} short option)
+        Enable debug mode and output lots of info
+
+    ${GREEN}--quiet${OFF} (${GREEN}-q${OFF} short option)
+        Disable normal message display to screen
+
 EOHELP
+else
+    cat >&$STDOUT <<EOHELP
+    For more help, try '$(basename $0) --help --verbose'
+EOHELP
+fi
 }
 
 # synopsis: setaction action
+# known actions: install help version
 # Sets $myaction or dies if $myaction is already set
 setaction() {
     if [ -n "$myaction" ] && [ "$myaction" != "$1" ]; then
@@ -136,6 +192,7 @@ setaction() {
 # pre_condition: gather_info() is run before it
 # use var defined in gather_info() to format label and mount disks
 prepare_disk() {
+    mesg "Perpare disk for $VM_NAME_COLOR"
     # create partition table for lv
     cat $PART_TABLE| fdisk $DISK_PATH
 
@@ -166,29 +223,28 @@ prepare_disk() {
 umount_volumn(){
     umount -lf ${VM_INSTALL_PATH}/{boot,home,}
     kpartx -d $DISK_PATH
+    rm ${VM_INSTALL_PATH} -rf
 }
 
 # synopsis: check_base_system_tar
 # Download the chosen system archive file if not exist
 # then check the MD5 sum if $checksum is true
 check_base_system_tar() {
-    for i in $BASE_SYSTEM ;do
-        local file=${i##*/}
-        if ! [ -f $XEN_PREFIX/$file ];then
-            mesg "Downloading system archive file"
-            wget -O $XEN_PREFIX/$file $i
+    local file=${BASE_SYSTEM##*/}
+    if ! [ -f $BASE_SYSTEM_FILE ];then
+        mesg "Downloading system archive file from '${BLDYEL}${BASE_SYSTEM}${OFF}'"
+        wget -O $BASE_SYSTEM_FILE $BASE_SYSTEM || die "Download failed with exit code $?. Please check the log file $XEN_PREFIX/log/pre.log"
     else
         mesg "System archive file \"$XEN_PREFIX/$file\" exist"
     fi
-        $checksum && wget -O $XEN_PREFIX/${file}.MD5 ${i}.MD5
-    done
+    $checksum && { wget -O ${BASE_SYSTEM_FILE}.MD5 ${BASE_SYSTEM}.MD5 || die "MD5 file download failed with exit code $?. Please check the log file $XEN_PREFIX/log/pre.log"; }
 
     $checksum || return 0
     for md5 in $XEN_PREFIX/*.MD5; do
         # md5 check
         mesg "MD5 checking"
         if ! (cd $XEN_PREFIX; md5sum -c $md5); then
-            rm ${md5%%.MD5}
+            rm ${md5%%.MD5} || die "rm file ${md5%%.MD5} failed by code $?, Please check the log file $XEN_PREFIX/log/pre.log"
             warn "MD5 check failed, re-download file again"
             check_base_system_tar
         fi
@@ -204,7 +260,7 @@ guest_xen() {
 
     wget -q -O /tmp/xen_guest  "http://10.253.33.2/xen_connect_xyx.php?&action=search_install&phyhost=$os_servicetag"
 
-    [ -d /etc/xen/auto ] || mkdir -p /etc/xen/auto    
+    [ -d /etc/xen/auto ] || mkdir -p /etc/xen/auto
 
     for line in `cat /tmp/xen_guest`
     do
@@ -251,7 +307,6 @@ gather_info() {
 
   # redirect STDOUT and STDERR
     VM_LOG="$XEN_PREFIX/log/${VM_NAME}.log"
-    VM_ERROR_LOG="$XEN_PREFIX/log/${VM_NAME}.error"
 
     if $debug;then
         mesg "VM: $VM
@@ -268,7 +323,6 @@ gather_info() {
   exec 1>>$VM_LOG
   exec 2>&1
 
-    mesg "Start install ${VM_NAME_COLOR}"
 }
 
 # synopsis: untar_system
@@ -342,72 +396,50 @@ EOF
 # nothing to say
 start_vm() {
     mesg "Starting VM ${VM_NAME_COLOR}"
-    xm create $VM
-    mesg "Install ${VM_NAME_COLOR} complete"
+    xm create $VM || error "${VM_NAME_COLOR} start failed"
+    info "Install ${VM_NAME_COLOR} complete"
 }
 
-###################################
-#                                 #
-#            Main Part            #
-#                                 #
-###################################
-
-
-# Parse the command-line
-while [ -n "$1" ]; do
-    case "$1" in
-        --help|-h)
-            setaction help
-            ;;
-        --reinstall-file)
-            shift
-            setaction reinstall
-            if [ -n "$1" ]; then
-                REINSTALL_FILE=$1;
-                [ -f "$REINSTALL_FILE" ] || die "Reinstall file $REINSTALL_FILE does not exist."
-                XEN_CONFIG_FILES=`cat $REINSTALL_FILE`
-            else
-                die "--reinstall requires a file with hostname in each line."
-            fi
-            ;;
-        --reinstall-hosts)
-            shift
-            setaction reinstall
-            if [ -n "$1" ]; then
-                XEN_CONFIG_FILES=${XEN_CONFIG_FILES+$XEN_CONFIG_FILES }${1}
-            fi
-            ;;
-        --version|-V)
-            setaction version
-            ;;
-        --nocolor)
-            color=false
-            ;;
-        --nochecksum)
-            checksum=false
-            ;;
-        *)
-            die "Unknown option: $1"
-            ;;
-    esac
+# synopsis: VM_to_install "VM_NAME"
+# show the VMs which will be installed
+VM_to_install(){
+    qprint
+    mesg "Following VM(s) is gonna be installed:"
+    unset i;
+    declare -i count=0
+    while [ -n "$1" ];do
+        if [ $count -eq 3 ]; then
+            mesg "    $VM_INSTALL_TEMP"
+            unset VM_INSTALL_TEMP
+            declare -i count=1
+        else
+            count=$count+1
+        fi
+    VM_INSTALL_TEMP=${VM_INSTALL_TEMP+$VM_INSTALL_TEMP }${1##*/}
     shift
-done
+    done
+    mesg "    $VM_INSTALL_TEMP"
+    qprint
+}
 
-# default action is install all none active vm
-myaction=${myaction-install}
+# synopsis: post_check $XEN_INSTALL_FILES
+# check all VM_NAME in $(xm list) and print out
+post_check(){
+    for i in $1; do
+        xm list > ${XM_LIST}
+        gather_info
+        if grep "${VM_NAME}" ${XM_LIST}; then
+            mesg "${VM_NAME_COLOR} started!"
+        else
+            error "${VM_NAME_COLOR} start failed"
+        fi
+    done
+}
 
-# disable color if necessary
-$color || unset BLUE CYAN CYANN GREEN PURP OFF RED
-
-[ -d $XEN_PREFIX ] || mkdir -p $XEN_PREFIX
-[ -d $XEN_PREFIX/log ] || mkdir -p $XEN_PREFIX/log
-
-qprint
-mesg "${PURP}XEN_VM_Auto_Install ${OFF}${CYANN}${version}${OFF} ~ ${GREEN}http://www.alipay.com${OFF}"
-[ "$myaction" = version ] && { versinfo; exit 0; }
-[ "$myaction" = help ] && { versinfo; helpinfo; exit 0; }
-
-cat <<EOF > $PART_TABLE 
+# synopsis: mkPart_table
+# create a file for fdisk to read
+mkPart_table(){
+    cat <<EOF > $PART_TABLE
 o
 n
 p
@@ -441,17 +473,129 @@ l
 p
 w
 EOF
-
+}
+###################################
+#                                 #
+#            Main Part            #
+#                                 #
+###################################
+longopt="help,install:,force,from-file:,version,nocolor,nochecksum,dryrun,verbose,quiet,debug,nodebug"
+shortopt="fhi:qrvCDF:SV"
+# Check if debug mode is set
+if echo $(getopt -l $longopt -o $shortopt -q -- "$@") | grep -e '--debug' -e '-D' >/dev/null; then
+    if echo "$*" |grep -e '--nodebug'; then
+        echo "debugging"
+    else
+        warn "Entering debug mode"
+        sh -x $0 "$@" --nodebug
+        warn "Exiting debug mode"
+        exit 8
+    fi
+fi
 # redirect all STDOUT and STDERR
 exec 1>$XEN_PREFIX/log/pre.log
 exec 2>&1
 
+# Parse the command-line
+args=$(getopt -l $longopt -o $shortopt -n $(basename $0) -- "$@")
+[ $? -eq 0 ] || die "Unknown options"
+set -- $args
+while [ -n "$1" ]; do
+    case "$1" in
+        --help|-h)
+            setaction help
+            ;;
+        --from-file|-F)
+            shift
+            if [ -n "$1" ]; then
+                HOSTFILE=$(echo $1 | cut -d"'" -f2);
+                [ -f "$HOSTFILE" ] || die "Install file $HOSTFILE does not exist."
+                XEN_CONFIG_FILES=`cat $HOSTFILE`
+            else
+                die "--from-file requires a file with hostname in each line."
+            fi
+            ;;
+        --version|-V)
+            setaction version
+            ;;
+        --nocolor|-C)
+            color=false
+            ;;
+        --nochecksum|-S)
+            checksum=false
+            ;;
+        --dryrun|-r)
+            dryrun=true
+            ;;
+        --force|-f)
+            force=true
+            ;;
+        --quiet|-q)
+            quietopt=true
+            ;;
+        --verbose|-v)
+            verbose=true
+            ;;
+        --install|-i)
+            setaction install
+            shift
+            unset temp
+            unset i
+            temp1=$(echo $1|cut -d"'" -f2)
+            temp=$(echo $temp1 | tr [:lower:] [:upper:])
+            i=SYSTEM_${temp}
+            if echo ${!SYSTEM_*} | grep $i >/dev/null; then
+                BASE_SYSTEM=${!i}
+            elif echo $temp1 |grep -e '^http://'>/dev/null; then
+                BASE_SYSTEM=$temp1
+            else
+                die "Please refer to a given Mark or specify an http link"
+            fi
+            BASE_SYSTEM_FILE="$XEN_PREFIX/${BASE_SYSTEM##*/}"
+            ;;
+        --nodebug)
+            # it means we are in the debug mode
+            debug=true
+            ;;
+        --debug|-D)
+            ;;
+        --)
+            ;;
+        --*)
+            die "Unknown option: $1"
+            ;;
+        *)
+            if [ -n "$1" ]; then
+                XEN_CONFIG_FILES=${XEN_CONFIG_FILES+$XEN_CONFIG_FILES }${1}
+            fi
+            ;;
+    esac
+    shift
+done
+
+# default action is install all none active vm
+myaction=${myaction-help}
+
+# disable color if necessary
+$color || unset BLUE CYAN CYANN GREEN PURP OFF RED BLDWHT BLDYEL
+
+[ -d $XEN_PREFIX ] || mkdir -p $XEN_PREFIX
+[ -d $XEN_PREFIX/log ] || mkdir -p $XEN_PREFIX/log
+
+qprint
+mesg "${PURP}XEN_VM_Auto_Install ${OFF}${CYANN}${version}${OFF} ~ ${GREEN}http://www.alipay.com${OFF}"
+[ "$myaction" = version ] && { versinfo; exit 0; }
+[ "$myaction" = help ] && { versinfo; helpinfo; exit 0; }
+
 mesg "Start installing"
-check_base_system_tar
+if ! $dryrun; then
+    mkPart_table
+    check_base_system_tar
+fi
 guest_xen
 
 # Set up traps
-# umount volumn when catching signal 1 9 15
+# umount volumn when catching signal 1 2 3 9 15
 trap '{
 umount_volumn
 } &
@@ -459,18 +603,28 @@ exit 1' 1 2 3 9 15
 
 case "$myaction" in
     install)
-        XEN_CONFIG_FILES=$(find $XEN_CONFIG -type f)
-        ;;
-    reinstall)
-        [ -z "$XEN_CONFIG_FILES" ] && XEN_CONFIG_FILES=$(cat $REINSTALL_FILE)
-        # search for config files
-        for temp in "$XEN_CONFIG_FILES";do
-            temp="${temp##*/}"
-            temp1=$( find $XEN_CONFIG -type f -name "$temp" -print )
-            if echo $temp2 | grep $temp1 ;then
-                continue
+        # if VM_NAMEs appointed then install those VMs
+        # if no VM_NAMEs appointed then find all of the xen configs
+        # if no VM_NAMEs appointed but hostfile specified, read file and install those VMs in file
+        if [ -z "$XEN_CONFIG_FILES" ];then
+            if [ -z "$HOSTFILE" ];then
+                XEN_CONFIG_FILES=$(find $XEN_CONFIG -type f)
+            else
+                XEN_CONFIG_FILES=$(cat $HOSTFILE)
             fi
-            temp2=${temp2+$temp2 }${temp1}
+        fi
+        # search for the existing given VM configs and save for install
+        for temp in $XEN_CONFIG_FILES;do
+            temp="${temp##*/}"
+            temp=$(echo $temp|cut -d"'" -f2)
+            temp1=$( find $XEN_CONFIG -type f -name "$temp" -print )
+            for i in $temp1;do
+                if echo $temp2 | grep $i ;then
+                    continue
+                else
+                    temp2=${temp2+$temp2 }${i}
+                fi
+            done
         done
         XEN_CONFIG_FILES=$temp2
         ;;
@@ -478,28 +632,31 @@ case "$myaction" in
         die "Unknown action by $myaction."
 esac
 
+# print VMs which is going to be installed
+VM_to_install $XEN_CONFIG_FILES
+$dryrun && exit 0
 
+# install VM in $XEN_CONFIG_FILES recursively
 for VM in $XEN_CONFIG_FILES ;do
-    xm list > /tmp/xm_list
+    xm list > ${XM_LIST}
     gather_info
+    info "Start install ${VM_NAME_COLOR}"
     case "$myaction" in
         install)
-            # if current VM is running, skip it
-            if grep "${VM_NAME}" /tmp/xm_list;then
-                warn "VM ${VM_NAME_COLOR} is RUNNING, skip it"
-                continue
-            fi
-            ;;
-        reinstall)
-            if grep "${VM_NAME}" /tmp/xm_list; then
-                mesg "VM ${VM_NAME_COLOR} is RUNNING, destroy it"
-                xm destroy ${VM_NAME} || die "destory ${VM_NAME_COLOR} failed"
+            if grep "${VM_NAME}" ${XM_LIST}; then
+                if $force;then
+                    warn "VM ${VM_NAME_COLOR} is RUNNING, destroy it"
+                    xm destroy ${VM_NAME} || die "destory ${VM_NAME_COLOR} failed"
+                else
+                    warn "VM ${VM_NAME_COLOR} is RUNNING, skip it"
+                    qprint
+                    continue
+                fi
             fi
             ;;
     esac
 
     # gather_info befor each install stage
-    mesg "Perpare for $VM_NAME_COLOR"
     prepare_disk
     untar_system
     config_ip
@@ -510,4 +667,8 @@ for VM in $XEN_CONFIG_FILES ;do
     exec 2>&1
     qprint
 done
+
+# post check for all installed VMs
+post_check $XEN_CONFIG_FILES
 mesg "All Finish"
+exit 0
