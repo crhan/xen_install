@@ -9,8 +9,10 @@
 #   2011/08/24      @ruohanc    v1.1
 #   2011/08/25      @ruohanc    v1.2
 #   2011/08/26      @ruohanc    v1.3
+#   2011/08/27      @ruohanc    v1.3.1
+#   2011/08/31      @ruohanc    v2.0
 #
-version="v1.3.1"
+version="v2.0"
 PATH="/sbin:/bin:/usr/sbin:/usr/bin"
 
 CWD="$( cd "$( dirname "$0" )" && pwd )"
