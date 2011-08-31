@@ -231,7 +231,7 @@ check_base_system_tar() {
         # md5 check
         mesg "MD5 checking"
         if ! (cd $XEN_PREFIX; md5sum -c $md5); then
-            rm ${md5%%.MD5}
+            rm ${md5%%.MD5} || die "rm file ${md5%%.MD5} failed by code $?, Please check the log file $XEN_PREFIX/log/pre.log"
             warn "MD5 check failed, re-download file again"
             check_base_system_tar
         fi
@@ -247,7 +247,7 @@ guest_xen() {
 
     wget -q -O /tmp/xen_guest  "http://10.253.33.2/xen_connect_xyx.php?&action=search_install&phyhost=$os_servicetag"
 
-    [ -d /etc/xen/auto ] || mkdir -p /etc/xen/auto    
+    [ -d /etc/xen/auto ] || mkdir -p /etc/xen/auto
 
     for line in `cat /tmp/xen_guest`
     do
@@ -470,12 +470,13 @@ while [ -n "$1" ]; do
             shift
             unset temp
             unset i
-            temp=$(echo $1 | cut -d"'" -f2 | tr [:lower:] [:upper:])
+            temp1=$(echo $1|cut -d"'" -f2)
+            temp=$(echo $temp1 | tr [:lower:] [:upper:])
             i=SYSTEM_${temp}
             if echo ${!SYSTEM_*} | grep $i >/dev/null; then
                 BASE_SYSTEM=${!i}
-            elif echo $1 |grep -e '^http://'; then
-                BASE_SYSTEM=$1
+            elif echo $temp1 |grep -e '^http://'>/dev/null; then
+                BASE_SYSTEM=$temp1
             else
                 die "Please refer to a given Mark or specify an http link"
             fi
@@ -503,7 +504,7 @@ done
 myaction=${myaction-help}
 
 # disable color if necessary
-$color || unset BLUE CYAN CYANN GREEN PURP OFF RED
+$color || unset BLUE CYAN CYANN GREEN PURP OFF RED BLDWHT BLDYEL
 
 [ -d $XEN_PREFIX ] || mkdir -p $XEN_PREFIX
 [ -d $XEN_PREFIX/log ] || mkdir -p $XEN_PREFIX/log
