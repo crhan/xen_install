@@ -16,7 +16,7 @@ PATH="/sbin:/bin:/usr/sbin:/usr/bin"
 CWD="$( cd "$( dirname "$0" )" && pwd )"
 XEN_PREFIX="/tmp/xen_install"
 XEN_CONFIG="/etc/xen/auto"
-XM_LIST="${XEN_PREFIX/xm_list}"
+XM_LIST="${XEN_PREFIX}/xm_list"
 LOG="$XEN_PREFIX/log/install.log"
 PART_TABLE="$XEN_PREFIX/part-table"
 
@@ -32,6 +32,7 @@ quietopt=false
 dryrun=false
 force=false
 verbose=false
+debug=false
 color=true
 checksum=true
 unset myaction
@@ -61,6 +62,13 @@ logger() {
 # Prettily print something to stderr, honors quietopt
 mesg() {
     qprint " ${GREEN}*${OFF} $*"
+    logger " ${GREEN}*${OFF} $*"
+}
+
+# synopsis: info "message"
+# Prettily print a message like mesg() to stderr, but ignore quietopt
+info() {
+    echo " ${GREEN}*${OFF} $*" >&$STDERR
     logger " ${GREEN}*${OFF} $*"
 }
 
@@ -182,6 +190,7 @@ setaction() {
 # pre_condition: gather_info() is run before it
 # use var defined in gather_info() to format label and mount disks
 prepare_disk() {
+    mesg "Perpare disk for $VM_NAME_COLOR"
     # create partition table for lv
     cat $PART_TABLE| fdisk $DISK_PATH
 
@@ -212,6 +221,7 @@ prepare_disk() {
 umount_volumn(){
     umount -lf ${VM_INSTALL_PATH}/{boot,home,}
     kpartx -d $DISK_PATH
+    rm ${VM_INSTALL_PATH} -rf
 }
 
 # synopsis: check_base_system_tar
@@ -225,7 +235,7 @@ check_base_system_tar() {
     else
         mesg "System archive file \"$XEN_PREFIX/$file\" exist"
     fi
-    $checksum && wget -O ${BASE_SYSTEM_FILE}.MD5 ${BASE_SYSTEM}.MD5 || die "MD5 file download failed with exit code $?. Please check the log file $XEN_PREFIX/log/pre.log"
+    $checksum && { wget -O ${BASE_SYSTEM_FILE}.MD5 ${BASE_SYSTEM}.MD5 || die "MD5 file download failed with exit code $?. Please check the log file $XEN_PREFIX/log/pre.log"; }
 
     $checksum || return 0
     for md5 in $XEN_PREFIX/*.MD5; do
@@ -311,7 +321,6 @@ gather_info() {
   exec 1>>$VM_LOG
   exec 2>&1
 
-    mesg "Start install ${VM_NAME_COLOR}"
 }
 
 # synopsis: untar_system
@@ -386,24 +395,26 @@ EOF
 start_vm() {
     mesg "Starting VM ${VM_NAME_COLOR}"
     xm create $VM || error "${VM_NAME_COLOR} start failed"
-    mesg "Install ${VM_NAME_COLOR} complete"
+    info "Install ${VM_NAME_COLOR} complete"
 }
 
 # synopsis: VM_to_install "VM_NAME"
 # show the VMs which will be installed
 VM_to_install(){
+    qprint
     mesg "Following VM(s) is gonna be installed:"
     unset i;
     declare -i count=0
-    for i in $1; do
-        if [ $count -eq 2 ]; then
+    while [ -n "$1" ];do
+        if [ $count -eq 3 ]; then
             mesg "    $VM_INSTALL_TEMP"
             unset VM_INSTALL_TEMP
-            count=0;
+            declare -i count=1
         else
             count=$count+1
         fi
-        VM_INSTALL_TEMP=${VM_INSTALL_TEMP+$VM_INSTALL_TEMP }${i##*/}
+    VM_INSTALL_TEMP=${VM_INSTALL_TEMP+$VM_INSTALL_TEMP }${1##*/}
+    shift
     done
     mesg "    $VM_INSTALL_TEMP"
     qprint
@@ -422,24 +433,66 @@ post_check(){
         fi
     done
 }
+
+# synopsis: mkPart_table
+# create a file for fdisk to read
+mkPart_table(){
+    cat <<EOF > $PART_TABLE
+o
+n
+p
+1
+
++250M
+a
+1
+n
+p
+2
+
++15G
+n
+p
+3
+
++2G
+t
+3
+82
+n
+e
+4
+
+
+n
+l
+
+
+p
+w
+EOF
+}
 ###################################
 #                                 #
 #            Main Part            #
 #                                 #
 ###################################
 longopt="help,install:,force,from-file:,version,nocolor,nochecksum,dryrun,verbose,quiet,debug,nodebug"
-shortopt="fhi:qrvCDFSV"
+shortopt="fhi:qrvCDF:SV"
 # Check if debug mode is set
-if echo "$*" | grep -e '--debug' -e '-D' >/dev/null; then
+if echo $(getopt -l $longopt -o $shortopt -q -- "$@") | grep -e '--debug' -e '-D' >/dev/null; then
     if echo "$*" |grep -e '--nodebug'; then
-        echo >/dev/null
+        echo "debugging"
     else
         warn "Entering debug mode"
-        sh -x $0 "$*" --nodebug
+        sh -x $0 "$@" --nodebug
         warn "Exiting debug mode"
         exit 8
     fi
 fi
+# redirect all STDOUT and STDERR
+exec 1>$XEN_PREFIX/log/pre.log
+exec 2>&1
 
 # Parse the command-line
 args=$(getopt -l $longopt -o $shortopt -n $(basename $0) -- "$@")
@@ -453,7 +506,7 @@ while [ -n "$1" ]; do
         --from-file|-F)
             shift
             if [ -n "$1" ]; then
-                HOSTFILE=$1;
+                HOSTFILE=$(echo $1 | cut -d"'" -f2);
                 [ -f "$HOSTFILE" ] || die "Install file $HOSTFILE does not exist."
                 XEN_CONFIG_FILES=`cat $HOSTFILE`
             else
@@ -499,6 +552,8 @@ while [ -n "$1" ]; do
             BASE_SYSTEM_FILE="$XEN_PREFIX/${BASE_SYSTEM##*/}"
             ;;
         --nodebug)
+            # it means we are in the debug mode
+            debug=true
             ;;
         --debug|-D)
             ;;
@@ -530,51 +585,15 @@ mesg "${PURP}XEN_VM_Auto_Install ${OFF}${CYANN}${version}${OFF} ~ ${GREEN}http:/
 [ "$myaction" = version ] && { versinfo; exit 0; }
 [ "$myaction" = help ] && { versinfo; helpinfo; exit 0; }
 
-cat <<EOF > $PART_TABLE 
-o
-n
-p
-1
-
-+250M
-a
-1
-n
-p
-2
-
-+15G
-n
-p
-3
-
-+2G
-t
-3
-82
-n
-e
-4
-
-
-n
-l
-
-
-p
-w
-EOF
-
-# redirect all STDOUT and STDERR
-exec 1>$XEN_PREFIX/log/pre.log
-exec 2>&1
-
 mesg "Start installing"
-check_base_system_tar
+if ! $dryrun; then
+    mkPart_table
+    check_base_system_tar
+fi
 guest_xen
 
 # Set up traps
-# umount volumn when catching signal 1 9 15
+# umount volumn when catching signal 1 2 3 9 15
 trap '{
 umount_volumn
 } &
@@ -593,13 +612,17 @@ case "$myaction" in
             fi
         fi
         # search for the existing given VM configs and save for install
-        for temp in "$XEN_CONFIG_FILES";do
+        for temp in $XEN_CONFIG_FILES;do
             temp="${temp##*/}"
+            temp=$(echo $temp|cut -d"'" -f2)
             temp1=$( find $XEN_CONFIG -type f -name "$temp" -print )
-            if echo $temp2 | grep $temp1 ;then
-                continue
-            fi
-            temp2=${temp2+$temp2 }${temp1}
+            for i in $temp1;do
+                if echo $temp2 | grep $i ;then
+                    continue
+                else
+                    temp2=${temp2+$temp2 }${i}
+                fi
+            done
         done
         XEN_CONFIG_FILES=$temp2
         ;;
@@ -615,14 +638,16 @@ $dryrun && exit 0
 for VM in $XEN_CONFIG_FILES ;do
     xm list > ${XM_LIST}
     gather_info
+    info "Start install ${VM_NAME_COLOR}"
     case "$myaction" in
         install)
             if grep "${VM_NAME}" ${XM_LIST}; then
                 if $force;then
-                    mesg "VM ${VM_NAME_COLOR} is RUNNING, destroy it"
+                    warn "VM ${VM_NAME_COLOR} is RUNNING, destroy it"
                     xm destroy ${VM_NAME} || die "destory ${VM_NAME_COLOR} failed"
                 else
                     warn "VM ${VM_NAME_COLOR} is RUNNING, skip it"
+                    qprint
                     continue
                 fi
             fi
@@ -630,7 +655,6 @@ for VM in $XEN_CONFIG_FILES ;do
     esac
 
     # gather_info befor each install stage
-    mesg "Perpare for $VM_NAME_COLOR"
     prepare_disk
     untar_system
     config_ip
