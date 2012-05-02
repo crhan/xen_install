@@ -16,7 +16,7 @@ tar 包解包. 最后根据安装服务器提供的配置信息, 更新 IP 等�
 [1]: http://fedoraproject.org/wiki/Anaconda
 [2]: http://fedoraproject.org/wiki/Anaconda/Kickstart
 
-最最后因为架构组的 SASS 平台上线,
+最最后因为架构组的 SaaS 平台上线,
 虚拟机的安装和管理不再需要使用这个脚本, 所以才将其放出,
 一来纪念下我*年轻*时候写的脚本, 二来其中使用的在 `bash-script`
 中做日志的方法还是挺有参考价值的.
